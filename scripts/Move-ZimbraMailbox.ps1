@@ -18,20 +18,26 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
     if ($mailContact) {
       Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
       try {
-        # Ищем AD-объект контакта и все группы, где он состоит как member
+        # Ищем AD-объект контакта для последующего удаления
         $adContact = $null
         try {
           $adContact = Get-ADObject -LDAPFilter "(&(objectClass=contact)(|(mail=$UserEmail)(proxyAddresses=SMTP:$UserEmail)(proxyAddresses=smtp:$UserEmail)))" -Properties DistinguishedName -ErrorAction Stop
         } catch {}
-        if ($adContact) {
-          $contactGroups = Get-ADGroup -LDAPFilter "(member=$($adContact.DistinguishedName))" -Properties DistinguishedName,Name,mail | Sort-Object Name
-          if ($contactGroups -and $contactGroups.Count -gt 0) {
-            Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, (($contactGroups | Select-Object -Expand Name) -join ", "))
-          } else {
-            Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
+
+        # Перебираем все рассылки и ищем контакт среди членов
+        $contactGroups = Get-DistributionGroup -ResultSize Unlimited | Where-Object {
+          try {
+            (Get-DistributionGroupMember -Identity $_.Identity -ResultSize Unlimited -ErrorAction Stop).PrimarySmtpAddress -contains $UserEmail
+          } catch {
+            Write-Verbose ("Не удалось получить членов группы '{0}': {1}" -f $_.Identity, $_.Exception.Message)
+            $false
           }
+        } | Sort-Object Name
+
+        if ($contactGroups.Count -gt 0) {
+          Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, (($contactGroups | Select-Object -Expand Name) -join ", "))
         } else {
-          Write-Host "AD-объект контакта не найден по mail/proxyAddresses — пропускаю сбор групп."
+          Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
         }
       } catch {
         Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
