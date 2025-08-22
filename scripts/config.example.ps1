@@ -1,0 +1,38 @@
+﻿# === Конфигурация миграции Zimbra -> Exchange ===
+# Сохрани этот файл рядом с Migration-Mailbox.ps1
+
+# Домен почты
+$Domain                 = ""
+
+# Админ (используется и как IMAP proxy-auth, и для FullAccess)
+$AdminLogin             = ""
+
+# IMAP: приемник — Exchange
+$ExchangeImapHost       = ""
+$ExchangeImapPort       = 993
+$ExchangeImapSSL        = $true
+
+# IMAP: источник — Zimbra
+$ZimbraImapHost         = ""
+$ZimbraImapPort         = 993
+$ZimbraImapSSL          = $true
+
+# Пароль IMAP-админа
+$AdminImapPasswordPlain = ""
+
+# SSH к Zimbra (где установлен imapsync)
+$ZimbraSshHost          = ""
+$ZimbraSshUser          = ""
+$ZimbraSshPasswordPlain = ""
+$ImapSyncPath           = "/usr/bin/imapsync"
+
+# PMG (Proxmox Mail Gateway) — обновление transport
+$PMGHost                = ""
+$PMGUser                = ""
+$PMGPasswordPlain       = ""
+
+# Логи на Windows
+$LocalLogDir            = "$PSScriptRoot\ImapSyncLogs"
+
+# Хост для подключения к Exchange Management PowerShell (если локально — оставь localhost)
+$ExchangeMgmtHost       = "localhost"
