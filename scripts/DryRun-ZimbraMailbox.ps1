@@ -29,13 +29,11 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
 
   # Сбор членств в рассылках
   $groups = @()
+  try { $recipient = Get-Recipient -Identity $UserEmail -ErrorAction Stop } catch { $recipient = $null }
   try {
-    $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
-    if ($recipient) {
-      $groups = Get-DistributionGroupsByMember $UserEmail |
-        Select-Object DisplayName,PrimarySmtpAddress |
-        Sort-Object DisplayName
-    }
+    $groups = Get-DistributionGroupsByMember $UserEmail |
+      Select-Object DisplayName,PrimarySmtpAddress |
+      Sort-Object DisplayName
   } catch {}
 
   if ($groups -and $groups.Count -gt 0) {
