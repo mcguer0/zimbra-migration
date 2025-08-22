@@ -1,4 +1,4 @@
-﻿# Экспортирует: Ensure-Module, New-SSHSess
+﻿# Экспортирует: Ensure-Module, New-SSHSess, Get-DistributionGroupsByMember
 
 function Ensure-Module([string]$Name) {
   if (-not (Get-Module -ListAvailable -Name $Name)) {
@@ -19,3 +19,9 @@ function New-SSHSess([string]$SshHost,[string]$SshUser,[string]$SshPass) {
   if (-not $res) { throw "Не удалось открыть SSH к $SshHost" }
   return $res
 }
+
+function Get-DistributionGroupsByMember([string]$dn) {
+  if (-not $dn) { return @() }
+  Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$dn'" -WarningAction SilentlyContinue
+}
+
