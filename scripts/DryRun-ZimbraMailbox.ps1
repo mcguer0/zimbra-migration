@@ -29,7 +29,6 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
 
   # Сбор членств в рассылках
   $groups = @()
-  try { $recipient = Get-Recipient -Identity $UserEmail -ErrorAction Stop } catch { $recipient = $null }
   try {
     $groups = Get-DistributionGroupsByMember $UserEmail |
       Select-Object DisplayName,PrimarySmtpAddress |
