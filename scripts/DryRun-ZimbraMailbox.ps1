@@ -1,4 +1,4 @@
-﻿# Требует: config.ps1
+﻿# Требует: config.ps1, utils.ps1
 # Экспортирует: Invoke-DryRunZimbraMailbox
 
 function Invoke-DryRunZimbraMailbox([string]$UserInput) {
@@ -29,22 +29,10 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
 
   # Сбор членств в рассылках
   $groups = @()
-  try {
-    $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
-    if ($recipient) {
-      $groups = Get-DistributionGroup -ResultSize Unlimited | ForEach-Object {
-        $dg = $_
-        try {
-          if ((Get-DistributionGroupMember $dg.Identity -ResultSize Unlimited).PrimarySmtpAddress -contains $UserEmail) {
-            $dg
-          }
-        } catch {}
-      } | Where-Object { $_ } | Select-Object Name | Sort-Object Name
-    }
-  } catch {}
+  try { $groups = Get-DistributionGroupsByMember $UserEmail } catch {}
 
   if ($groups -and $groups.Count -gt 0) {
-    Write-Host ("Состоит в {0} рассылк(ах): {1}" -f $groups.Count, ($groups.Name -join ", "))
+    Write-Host ("Состоит в {0} рассылк(ах): {1}" -f $groups.Count, ($groups.DisplayName -join ", "))
   } else {
     Write-Host "Не состоит ни в одной рассылке (AD-группе)."
   }

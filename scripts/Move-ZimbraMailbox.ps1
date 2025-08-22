@@ -18,27 +18,11 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
     if ($mailContact) {
       Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
       try {
-        # Перебираем все рассылки и проверяем, состоит ли контакт в них
-        $recipient = $null
-        try {
-          $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
-        } catch {}
-        if ($recipient) {
-          $contactGroups = Get-DistributionGroup -ResultSize Unlimited | ForEach-Object {
-            $dg = $_
-            try {
-              if ((Get-DistributionGroupMember $dg.Identity -ResultSize Unlimited).PrimarySmtpAddress -contains $UserEmail) {
-                $dg
-              }
-            } catch {}
-          } | Where-Object { $_ } | Select-Object Name,PrimarySmtpAddress,DistinguishedName | Sort-Object Name
-          if ($contactGroups -and $contactGroups.Count -gt 0) {
-            Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($contactGroups.Name -join ", "))
-          } else {
-            Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
-          }
+        $contactGroups = Get-DistributionGroupsByMember $UserEmail
+        if ($contactGroups -and $contactGroups.Count -gt 0) {
+          Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($contactGroups.DisplayName -join ", "))
         } else {
-          Write-Host "Объект с адресом $UserEmail не найден."
+          Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
         }
       } catch {
         Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
@@ -98,10 +82,10 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
       foreach ($g in $contactGroups) {
         try {
           Add-ADGroupMember -Identity $g.DistinguishedName -Members $adUser -ErrorAction Stop
-          Write-Host "  + $($g.Name) — добавлен"
+          Write-Host "  + $($g.DisplayName) — добавлен"
         } catch {
           # Если уже член — подавим ошибку с понятным сообщением
-          Write-Warning ("  ! {0} — {1}" -f $g.Name, $_.Exception.Message)
+          Write-Warning ("  ! {0} — {1}" -f $g.DisplayName, $_.Exception.Message)
         }
       }
     }
