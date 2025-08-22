@@ -40,17 +40,6 @@ function Ensure-ExchangeCmdlets {
   }
 }
 
-# Красивый Да/Нет
-function Ask-YesNo([string]$Title,[string]$Message,[bool]$DefaultYes = $true) {
-  $choices = @(
-    [System.Management.Automation.Host.ChoiceDescription]::new("&Да","Да"),
-    [System.Management.Automation.Host.ChoiceDescription]::new("&Нет","Нет")
-  )
-  $default = if ($DefaultYes) { 0 } else { 1 }
-  $res = $Host.UI.PromptForChoice($Title, $Message, $choices, $default)
-  return ($res -eq 0)
-}
-
 # == Инициализация окружения ==
 Ensure-ExchangeCmdlets
 Ensure-Module Posh-SSH
@@ -67,19 +56,11 @@ function Invoke-OneUser([string]$UserInput) {
   if ($move.ExitCode -eq 0) {
     Write-Host "`n✅ Миграция $UserEmail завершена успешно. Лог: $($move.LocalLog)"
 
-    # Решение пользователя (или -Force)
-    $DoRename = $true
-    $DoPMG    = $true
-    if (-not $Force) {
-      $DoRename = Ask-YesNo -Title "Переименовать Zimbra-аккаунт?" `
-                            -Message "Переименовать $UserEmail в ${Alias}_old@${Domain} (или с таймстампом при конфликте)?" `
-                            -DefaultYes $true
-      $DoPMG    = Ask-YesNo -Title "Создать/обновить transport на PMG?" `
-                            -Message "Добавить/обновить строку '$UserEmail smtp:[$ExchangeImapHost]:25' на $PMGHost?" `
-                            -DefaultYes $true
-    }
+    if ($Force) {
+      $pmg = Update-PMGTransport -UserEmail $UserEmail
+      if ($pmg.Success) { Write-Host "Транспорт обновлён: $($pmg.Line)" }
+      else { Write-Warning "Не удалось обновить transport на PMG: $($pmg.Error)" }
 
-    if ($DoRename) {
       $rename = Rename-ZimbraMailbox -UserEmail $UserEmail -Alias $Alias
       if ($rename.Success) {
         Write-Host "Переименовано в $($rename.NewEmail)"
@@ -88,15 +69,7 @@ function Invoke-OneUser([string]$UserInput) {
         Write-Warning "Не удалось переименовать: $($rename.Error)"
       }
     } else {
-      Write-Host "Переименование Zimbra-аккаунта пропущено."
-    }
-
-    if ($DoPMG) {
-      $pmg = Update-PMGTransport -UserEmail $UserEmail
-      if ($pmg.Success) { Write-Host "Транспорт обновлён: $($pmg.Line)" }
-      else { Write-Warning "Не удалось обновить transport на PMG: $($pmg.Error)" }
-    } else {
-      Write-Host "Обновление transport на PMG пропущено."
+      Write-Host "Переименование Zimbra-аккаунта и обновление transport на PMG пропущены (не указан -Force)."
     }
   } else {
     Write-Warning "`n⚠️ Миграция $UserEmail завершилась с кодом $($move.ExitCode). См. лог: $($move.LocalLog)"
