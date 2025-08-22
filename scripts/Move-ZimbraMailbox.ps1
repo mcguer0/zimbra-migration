@@ -17,23 +17,22 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
 
     if ($mailContact) {
       Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
+        try { $recipient = Get-Recipient -Identity $UserEmail -ErrorAction Stop } catch { $recipient = $null }
         try {
-          $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
-          if ($recipient) {
-            $contactGroups = Get-DistributionGroupsByMember $UserEmail |
-              Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
-              Sort-Object DisplayName
-            if ($contactGroups -and $contactGroups.Count -gt 0) {
-              $groupList = $contactGroups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
-              Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($groupList -join ", "))
-            } else {
-              Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
-            }
-          } else {
-            Write-Host "Объект с адресом $UserEmail не найден."
-          }
+          $contactGroups = Get-DistributionGroupsByMember $UserEmail |
+            Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
+            Sort-Object DisplayName
         } catch {
           Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
+        }
+        if (-not $recipient) {
+          Write-Host "Объект с адресом $UserEmail не найден."
+        }
+        if ($contactGroups -and $contactGroups.Count -gt 0) {
+          $groupList = $contactGroups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
+          Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($groupList -join ", "))
+        } else {
+          Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
         }
 
       # Теперь удаляем сам почтовый контакт
