@@ -18,15 +18,22 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
     if ($mailContact) {
       Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
       try {
-        # Ищем AD-объект контакта и все группы, где он состоит как member
+        # Ищем AD-объект контакта и собираем группы, где он состоит как member
         $adContact = $null
         try {
-          $adContact = Get-ADObject -LDAPFilter "(&(objectClass=contact)(|(mail=$UserEmail)(proxyAddresses=SMTP:$UserEmail)(proxyAddresses=smtp:$UserEmail)))" -Properties DistinguishedName -ErrorAction Stop
+          $adContact = Get-ADObject -LDAPFilter "(&(objectClass=contact)(|(mail=$UserEmail)(proxyAddresses=SMTP:$UserEmail)(proxyAddresses=smtp:$UserEmail)))" -Properties DistinguishedName,memberOf -ErrorAction Stop
         } catch {}
         if ($adContact) {
-          $contactGroups = Get-ADGroup -LDAPFilter "(member=$($adContact.DistinguishedName))" -Properties DistinguishedName,Name,mail | Sort-Object Name
-          if ($contactGroups -and $contactGroups.Count -gt 0) {
-            Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, (($contactGroups | Select-Object -Expand Name) -join ", "))
+          $groupDns = @($adContact.memberOf)
+          if ($groupDns.Count -gt 0) {
+            $contactGroups = $groupDns | ForEach-Object {
+              try { Get-ADGroup -Identity $_ -Properties DistinguishedName,Name,mail -ErrorAction Stop } catch {}
+            } | Where-Object { $_ } | Sort-Object Name
+            if ($contactGroups.Count -gt 0) {
+              Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, (($contactGroups | Select-Object -Expand Name) -join ", "))
+            } else {
+              Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
+            }
           } else {
             Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
           }
