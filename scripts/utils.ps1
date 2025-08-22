@@ -20,8 +20,14 @@ function New-SSHSess([string]$SshHost,[string]$SshUser,[string]$SshPass) {
   return $res
 }
 
-function Get-DistributionGroupsByMember([string]$dn) {
-  if (-not $dn) { return @() }
-  Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$dn'" -WarningAction SilentlyContinue
+function Get-DistributionGroupsByMember([string]$mail) {
+  if (-not $mail) { return @() }
+  Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue | Where-Object {
+    try {
+      (Get-DistributionGroupMember $_.Identity -ResultSize Unlimited -ErrorAction SilentlyContinue).PrimarySmtpAddress -contains $mail
+    } catch {
+      $false
+    }
+  }
 }
 

@@ -20,7 +20,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
         try {
           $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
           if ($recipient) {
-            $contactGroups = Get-DistributionGroupsByMember $recipient.DistinguishedName |
+            $contactGroups = Get-DistributionGroupsByMember $UserEmail |
               Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
               Sort-Object DisplayName
             if ($contactGroups -and $contactGroups.Count -gt 0) {

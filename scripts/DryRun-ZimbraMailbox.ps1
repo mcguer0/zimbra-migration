@@ -32,7 +32,7 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
   try {
     $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
     if ($recipient) {
-      $groups = Get-DistributionGroupsByMember $recipient.DistinguishedName |
+      $groups = Get-DistributionGroupsByMember $UserEmail |
         Select-Object DisplayName,PrimarySmtpAddress |
         Sort-Object DisplayName
     }
