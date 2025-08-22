@@ -32,19 +32,15 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
   try {
     $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
     if ($recipient) {
-      $groups = Get-DistributionGroup -ResultSize Unlimited | ForEach-Object {
-        $dg = $_
-        try {
-          if ((Get-DistributionGroupMember $dg.Identity -ResultSize Unlimited).PrimarySmtpAddress -contains $UserEmail) {
-            $dg
-          }
-        } catch {}
-      } | Where-Object { $_ } | Select-Object Name | Sort-Object Name
+      $groups = Get-DistributionGroupsByMember $recipient.DistinguishedName |
+        Select-Object DisplayName,PrimarySmtpAddress |
+        Sort-Object DisplayName
     }
   } catch {}
 
   if ($groups -and $groups.Count -gt 0) {
-    Write-Host ("Состоит в {0} рассылк(ах): {1}" -f $groups.Count, ($groups.Name -join ", "))
+    $info = $groups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
+    Write-Host ("Состоит в {0} рассылк(ах): {1}" -f $groups.Count, ($info -join ", "))
   } else {
     Write-Host "Не состоит ни в одной рассылке (AD-группе)."
   }

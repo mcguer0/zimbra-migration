@@ -17,32 +17,24 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
 
     if ($mailContact) {
       Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
-      try {
-        # Перебираем все рассылки и проверяем, состоит ли контакт в них
-        $recipient = $null
         try {
           $recipient = Get-Recipient -Filter "EmailAddresses -eq '$UserEmail' -or PrimarySmtpAddress -eq '$UserEmail'" -ErrorAction Stop
-        } catch {}
-        if ($recipient) {
-          $contactGroups = Get-DistributionGroup -ResultSize Unlimited | ForEach-Object {
-            $dg = $_
-            try {
-              if ((Get-DistributionGroupMember $dg.Identity -ResultSize Unlimited).PrimarySmtpAddress -contains $UserEmail) {
-                $dg
-              }
-            } catch {}
-          } | Where-Object { $_ } | Select-Object Name,PrimarySmtpAddress,DistinguishedName | Sort-Object Name
-          if ($contactGroups -and $contactGroups.Count -gt 0) {
-            Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($contactGroups.Name -join ", "))
+          if ($recipient) {
+            $contactGroups = Get-DistributionGroupsByMember $recipient.DistinguishedName |
+              Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
+              Sort-Object DisplayName
+            if ($contactGroups -and $contactGroups.Count -gt 0) {
+              $groupList = $contactGroups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
+              Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($groupList -join ", "))
+            } else {
+              Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
+            }
           } else {
-            Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
+            Write-Host "Объект с адресом $UserEmail не найден."
           }
-        } else {
-          Write-Host "Объект с адресом $UserEmail не найден."
+        } catch {
+          Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
         }
-      } catch {
-        Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
-      }
 
       # Теперь удаляем сам почтовый контакт
       try {
@@ -96,13 +88,13 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
     if ($contactGroups -and $contactGroups.Count -gt 0) {
       Write-Host "Добавляю пользователя $($adUser.SamAccountName) в рассылки вместо контакта..."
       foreach ($g in $contactGroups) {
-        try {
-          Add-ADGroupMember -Identity $g.DistinguishedName -Members $adUser -ErrorAction Stop
-          Write-Host "  + $($g.Name) — добавлен"
-        } catch {
-          # Если уже член — подавим ошибку с понятным сообщением
-          Write-Warning ("  ! {0} — {1}" -f $g.Name, $_.Exception.Message)
-        }
+          try {
+            Add-ADGroupMember -Identity $g.DistinguishedName -Members $adUser -ErrorAction Stop
+            Write-Host "  + $($g.DisplayName) — добавлен"
+          } catch {
+            # Если уже член — подавим ошибку с понятным сообщением
+            Write-Warning ("  ! {0} — {1}" -f $g.DisplayName, $_.Exception.Message)
+          }
       }
     }
   } catch {
