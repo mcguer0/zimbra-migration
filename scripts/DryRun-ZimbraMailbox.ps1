@@ -1,4 +1,4 @@
-# Требует: config.ps1
+﻿# Требует: config.ps1
 # Экспортирует: Invoke-DryRunZimbraMailbox
 
 function Invoke-DryRunZimbraMailbox([string]$UserInput) {
