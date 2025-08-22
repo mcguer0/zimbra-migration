@@ -17,19 +17,15 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
 
     if ($mailContact) {
       Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
-        try {
-          $contactGroups = Get-DistributionGroupsByMember $UserEmail |
-            Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
-            Sort-Object DisplayName
-        } catch {
-          Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
-        }
-        if ($contactGroups -and $contactGroups.Count -gt 0) {
-          $groupList = $contactGroups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
-          Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($groupList -join ", "))
-        } else {
-          Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
-        }
+      $contactGroups = Get-DistributionGroupsByMember $UserEmail |
+        Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
+        Sort-Object DisplayName
+      if ($contactGroups -and $contactGroups.Count -gt 0) {
+        $groupList = $contactGroups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
+        Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($groupList -join ", "))
+      } else {
+        Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
+      }
 
       # Теперь удаляем сам почтовый контакт
       try {
