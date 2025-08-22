@@ -29,14 +29,13 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
 
   # Сбор членств в рассылках
   $groups = @()
-  try { $recipient = Get-Recipient -Identity $UserEmail -ErrorAction Stop } catch { $recipient = $null }
   try {
-    $groups = Get-DistributionGroupsByMember $UserEmail |
+    $groups = @(Get-DistributionGroupsByMember $UserEmail |
       Select-Object DisplayName,PrimarySmtpAddress |
-      Sort-Object DisplayName
+      Sort-Object DisplayName)
   } catch {}
 
-  if ($groups -and $groups.Count -gt 0) {
+  if ($groups.Count -gt 0) {
     $info = $groups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
     Write-Host ("Состоит в {0} рассылк(ах): {1}" -f $groups.Count, ($info -join ", "))
   } else {

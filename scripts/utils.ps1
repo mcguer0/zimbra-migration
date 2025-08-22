@@ -22,12 +22,13 @@ function New-SSHSess([string]$SshHost,[string]$SshUser,[string]$SshPass) {
 
 function Get-DistributionGroupsByMember([string]$mail) {
   if (-not $mail) { return @() }
-  Get-DistributionGroup -ResultSize Unlimited -ErrorAction SilentlyContinue | Where-Object {
-    try {
-      (Get-DistributionGroupMember $_.Identity -ResultSize Unlimited -ErrorAction SilentlyContinue).PrimarySmtpAddress -contains $mail
-    } catch {
-      $false
-    }
+
+  try {
+    $recipient = Get-Recipient -Identity $mail -ErrorAction Stop
+  } catch {
+    return @()
   }
+
+  Get-DistributionGroup -Filter "Members -eq '$($recipient.DistinguishedName)'" -ResultSize Unlimited
 }
 
