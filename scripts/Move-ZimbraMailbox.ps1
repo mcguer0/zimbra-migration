@@ -37,18 +37,27 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
         Write-Warning "Не удалось определить членства контакта в группах: $($_.Exception.Message)"
       }
 
-      # Теперь отключаем сам почтовый контакт
+      # Теперь удаляем сам почтовый контакт
       try {
-        Disable-MailContact -Identity $mailContact.Identity -Confirm:$false -ErrorAction Stop
-        Write-Host "MailContact отключён: $($mailContact.Identity)"
+        Remove-MailContact -Identity $mailContact.Identity -Confirm:$false -ErrorAction Stop
+        Write-Host "MailContact удалён: $($mailContact.Identity)"
+
+        if ($adContact) {
+          try {
+            Remove-ADObject -Identity $adContact.DistinguishedName -Confirm:$false -ErrorAction Stop
+            Write-Host "AD-объект контакта удалён: $($adContact.DistinguishedName)"
+          } catch {
+            Write-Warning "Не удалось удалить AD-объект контакта '$($adContact.DistinguishedName)': $($_.Exception.Message)"
+          }
+        }
       } catch {
-        Write-Warning "Не удалось отключить MailContact '$($mailContact.Identity)': $($_.Exception.Message)"
+        Write-Warning "Не удалось удалить MailContact '$($mailContact.Identity)': $($_.Exception.Message)"
       }
     } else {
       Write-Host "MailContact не найден для $UserEmail (ok)"
     }
   } catch {
-    Write-Warning "Проверка/отключение MailContact завершилась ошибкой: $($_.Exception.Message)"
+    Write-Warning "Проверка/удаление MailContact завершилась ошибкой: $($_.Exception.Message)"
   }
 
   # Mailbox: существует?
