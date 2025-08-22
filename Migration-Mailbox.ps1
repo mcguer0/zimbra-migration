@@ -9,13 +9,17 @@ param(
   [string]$Path,
 
   # Без вопросов (автоматически переименовывать и писать transport)
-  [switch]$Force
+  [switch]$Force,
+
+  # Сухой прогон без переноса
+  [switch]$Dryrun
 )
 
 # == Подключаем конфиг и функции ==
 . "$PSScriptRoot\scripts\config.ps1"           # переменные окружения
 . "$PSScriptRoot\scripts\utils.ps1"            # Ensure-Module, New-SSHSess
 . "$PSScriptRoot\scripts\Move-ZimbraMailbox.ps1"
+. "$PSScriptRoot\scripts\DryRun-ZimbraMailbox.ps1"
 . "$PSScriptRoot\scripts\Rename-ZimbraMailbox.ps1"
 . "$PSScriptRoot\scripts\Update-PMGTransport.ps1"
 
@@ -48,6 +52,11 @@ if (-not (Test-Path $LocalLogDir)) { New-Item -Path $LocalLogDir -ItemType Direc
 
 # == Обработчик одного пользователя ==
 function Invoke-OneUser([string]$UserInput) {
+  if ($Dryrun) {
+    Invoke-DryRunZimbraMailbox -UserInput $UserInput | Out-Null
+    return
+  }
+
   # Выполняем перенос
   $move = Invoke-MoveZimbraMailbox -UserInput $UserInput
   $UserEmail = $move.UserEmail
