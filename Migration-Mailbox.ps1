@@ -12,7 +12,10 @@ param(
   [switch]$Force,
 
   # Сухой прогон без переноса
-  [switch]$Dryrun
+  [switch]$Dryrun,
+
+  # Предстейдж: не удалять контакты
+  [switch]$Staged
 )
 
 # == Подключаем конфиг и функции ==
@@ -58,7 +61,7 @@ function Invoke-OneUser([string]$UserInput) {
   }
 
   # Выполняем перенос
-  $move = Invoke-MoveZimbraMailbox -UserInput $UserInput
+  $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged -Activate:$Force
   $UserEmail = $move.UserEmail
   $Alias     = $move.Alias
 

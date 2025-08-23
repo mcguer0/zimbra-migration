@@ -1,12 +1,60 @@
 ﻿# Требует: config.ps1, utils.ps1
 # Экспортирует: Invoke-MoveZimbraMailbox
 
-function Invoke-MoveZimbraMailbox([string]$UserInput) {
+function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$Activate) {
   # Нормализация user/email
   if ($UserInput -like "*@*") { $UserEmail = $UserInput; $Alias = ($UserInput -split "@")[0] }
   else                        { $Alias = $UserInput; $UserEmail = "$UserInput@$Domain" }
 
   Write-Host "=== Подготовка ящика в Exchange для $UserEmail ==="
+
+  # Проверка контакта и групп
+  $contactGroups = @()
+  try {
+    $contact = Get-MailContact -Identity $UserEmail -ErrorAction SilentlyContinue
+    if ($contact) {
+      Write-Host "Найден контакт $UserEmail. Сохраняю группы..."
+      $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
+      if ($contactGroups) {
+        Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
+      } else {
+        Write-Host "Контакт не состоит ни в одной группе."
+      }
+
+      if ($Staged) {
+        Write-Host "Добавляю пользователя в группы контакта..."
+        foreach ($g in $contactGroups) {
+          try {
+            Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop
+            Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+          } catch {
+            Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+          }
+        }
+        Write-Host "Контакт остаётся до финального запуска."
+      } elseif ($Activate) {
+        Write-Host "Удаляю контакт $UserEmail..."
+        Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
+        Write-Host "Контакт удалён. Проверяю членство пользователя..."
+        foreach ($g in $contactGroups) {
+          try {
+            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
+            if ($members.PrimarySmtpAddress -contains $UserEmail) {
+              Write-Host "Пользователь состоит в группе $($g.PrimarySmtpAddress)"
+            } else {
+              Write-Warning "Пользователь отсутствует в группе $($g.PrimarySmtpAddress)"
+            }
+          } catch {
+            Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+          }
+        }
+      } else {
+        Write-Host "Контакт остаётся (не указан -Activate)."
+      }
+    }
+  } catch {
+    Write-Warning ("Не удалось обработать контакт {0}: {1}" -f $UserEmail, $_.Exception.Message)
+  }
 
     # Mailbox: существует?
   try {
@@ -15,8 +63,22 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
   } catch {
     Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
     Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
+    if ($Staged) {
+      Disable-ADAccount -Identity $Alias -ErrorAction Stop
+      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+    }
     Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
     Start-Sleep -Seconds 60
+  }
+
+  if ($Activate) {
+    try {
+      Enable-ADAccount -Identity $Alias -ErrorAction Stop
+      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Write-Host "Учетная запись активирована."
+    } catch {
+      Write-Warning ("Не удалось активировать учетную запись {0}: {1}" -f $Alias, $_.Exception.Message)
+    }
   }
 
   # UPN (если задан UpnSuffix — используем его; иначе домен)
