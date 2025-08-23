@@ -8,6 +8,25 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
 
   Write-Host "=== Подготовка ящика в Exchange для $UserEmail ==="
 
+  # Проверка контакта и групп
+  $contactGroups = @()
+  try {
+    $contact = Get-MailContact -Identity $UserEmail -ErrorAction SilentlyContinue
+    if ($contact) {
+      Write-Host "Найден контакт $UserEmail. Сохраняю группы и удаляю контакт..."
+      $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
+      if ($contactGroups) {
+        Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
+      } else {
+        Write-Host "Контакт не состоит ни в одной группе."
+      }
+      Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
+      Write-Host "Контакт удалён."
+    }
+  } catch {
+    Write-Warning ("Не удалось обработать контакт {0}: {1}" -f $UserEmail, $_.Exception.Message)
+  }
+
     # Mailbox: существует?
   try {
     $null = Get-Mailbox -Identity $UserEmail -ErrorAction Stop
@@ -54,6 +73,18 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
     Write-Host "FullAccess уже есть."
   }
   Start-Sleep -Seconds 2
+
+  if ($contactGroups -and $contactGroups.Count -gt 0) {
+    Write-Host "Добавляю пользователя в группы бывшего контакта..."
+    foreach ($g in $contactGroups) {
+      try {
+        Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop
+        Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+      } catch {
+        Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+      }
+    }
+  }
 
   # Готовим удалённый bash-скрипт imapsync
   $AdminImapB64   = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($AdminImapPasswordPlain))
