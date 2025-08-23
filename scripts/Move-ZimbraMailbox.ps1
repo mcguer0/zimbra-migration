@@ -36,6 +36,10 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged) {
   } catch {
     Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
     Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
+    if ($Staged) {
+      Disable-ADAccount -Identity $Alias -ErrorAction Stop
+      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+    }
     Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
     Start-Sleep -Seconds 60
   }
