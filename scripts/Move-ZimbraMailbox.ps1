@@ -68,17 +68,19 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
     # Mailbox: существует?
   try {
-    $mailboxIdentity = if ($Activate) { $TempEmail } else { $UserEmail }
+    $mailboxIdentity = if ($Staged -and $TempEmail) { $TempEmail } else { $UserEmail }
     $null = Get-Mailbox -Identity $mailboxIdentity -ErrorAction Stop
     Write-Host "Mailbox уже существует."
   } catch {
     if ($Activate) {
-      Write-Warning "Временный mailbox $TempEmail не найден."
+      Write-Warning "Mailbox $mailboxIdentity не найден."
     } elseif ($Staged -and $contact) {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
       Disable-ADAccount -Identity $Alias -ErrorAction Stop
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
+      Start-Sleep -Seconds 60
     } else {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
@@ -119,18 +121,18 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   }
 
   # Включаем IMAP
-  $cas = Get-CASMailbox -Identity $UserEmail -ErrorAction Stop
+  $cas = Get-CASMailbox -Identity $mailboxIdentity -ErrorAction Stop
   if (-not $cas.ImapEnabled) {
-    Set-CASMailbox -Identity $UserEmail -ImapEnabled $true -ErrorAction Stop
+    Set-CASMailbox -Identity $mailboxIdentity -ImapEnabled $true -ErrorAction Stop
     Write-Host "IMAP включён."
   } else {
     Write-Host "IMAP уже включён."
   }
 
   # FullAccess для админа
-  $perm = Get-MailboxPermission -Identity $UserEmail | Where-Object { $_.User -eq $AdminLogin -and $_.AccessRights -contains 'FullAccess' -and -not $_.IsInherited }
+  $perm = Get-MailboxPermission -Identity $mailboxIdentity | Where-Object { $_.User -eq $AdminLogin -and $_.AccessRights -contains 'FullAccess' -and -not $_.IsInherited }
   if (-not $perm) {
-    Add-MailboxPermission -Identity $UserEmail -User $AdminLogin -AccessRights FullAccess -InheritanceType All -AutoMapping:$false | Out-Null
+    Add-MailboxPermission -Identity $mailboxIdentity -User $AdminLogin -AccessRights FullAccess -InheritanceType All -AutoMapping:$false | Out-Null
     Write-Host "FullAccess выдан $AdminLogin."
   } else {
     Write-Host "FullAccess уже есть."
