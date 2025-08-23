@@ -1,7 +1,7 @@
 ﻿# Требует: config.ps1, utils.ps1
 # Экспортирует: Invoke-MoveZimbraMailbox
 
-function Invoke-MoveZimbraMailbox([string]$UserInput) {
+function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged) {
   # Нормализация user/email
   if ($UserInput -like "*@*") { $UserEmail = $UserInput; $Alias = ($UserInput -split "@")[0] }
   else                        { $Alias = $UserInput; $UserEmail = "$UserInput@$Domain" }
@@ -10,21 +10,23 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
 
   # Проверка контакта и групп
   $contactGroups = @()
-  try {
-    $contact = Get-MailContact -Identity $UserEmail -ErrorAction SilentlyContinue
-    if ($contact) {
-      Write-Host "Найден контакт $UserEmail. Сохраняю группы и удаляю контакт..."
-      $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
-      if ($contactGroups) {
-        Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
-      } else {
-        Write-Host "Контакт не состоит ни в одной группе."
+  if (-not $Staged) {
+    try {
+      $contact = Get-MailContact -Identity $UserEmail -ErrorAction SilentlyContinue
+      if ($contact) {
+        Write-Host "Найден контакт $UserEmail. Сохраняю группы и удаляю контакт..."
+        $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
+        if ($contactGroups) {
+          Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
+        } else {
+          Write-Host "Контакт не состоит ни в одной группе."
+        }
+        Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
+        Write-Host "Контакт удалён."
       }
-      Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
-      Write-Host "Контакт удалён."
+    } catch {
+      Write-Warning ("Не удалось обработать контакт {0}: {1}" -f $UserEmail, $_.Exception.Message)
     }
-  } catch {
-    Write-Warning ("Не удалось обработать контакт {0}: {1}" -f $UserEmail, $_.Exception.Message)
   }
 
     # Mailbox: существует?
