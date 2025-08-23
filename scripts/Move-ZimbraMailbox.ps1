@@ -25,12 +25,19 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         Write-Host "Добавляю пользователя в группы контакта..."
         foreach ($g in $contactGroups) {
           try {
-            Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop
-            Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
+            if ($members.PrimarySmtpAddress -notcontains $UserEmail) {
+              Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction SilentlyContinue
+              Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+            } else {
+              Write-Host "Пользователь уже состоит в группе $($g.PrimarySmtpAddress)"
+            }
           } catch {
             Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
+        $AliasTemp = "${Alias}_1"
+        $TempEmail = "$AliasTemp@$Domain"
         Write-Host "Контакт остаётся до финального запуска."
       } elseif ($Activate) {
         Write-Host "Удаляю контакт $UserEmail..."
@@ -48,6 +55,14 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
             Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
+        $AliasTemp = "${Alias}_1"
+        $TempEmail = "$AliasTemp@$Domain"
+        try {
+          Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
+          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -Alias $Alias -ErrorAction Stop
+        } catch {
+          Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
+        }
       } else {
         Write-Host "Контакт остаётся (не указан -Activate)."
       }
@@ -58,17 +73,29 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
     # Mailbox: существует?
   try {
-    $null = Get-Mailbox -Identity $UserEmail -ErrorAction Stop
+    $mailboxIdentity = if ($Staged -and $TempEmail) { $TempEmail } else { $UserEmail }
+    $null = Get-Mailbox -Identity $mailboxIdentity -ErrorAction Stop
     Write-Host "Mailbox уже существует."
   } catch {
-    Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
-    Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
-    if ($Staged) {
+    if ($Activate) {
+      Write-Warning "Mailbox $mailboxIdentity не найден."
+    } elseif ($Staged -and $contact) {
+      Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
+      Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
       Disable-ADAccount -Identity $Alias -ErrorAction Stop
-      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
+      Start-Sleep -Seconds 60
+    } else {
+      Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
+      Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
+      if ($Staged) {
+        Disable-ADAccount -Identity $Alias -ErrorAction Stop
+        Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      }
+      Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
+      Start-Sleep -Seconds 60
     }
-    Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
-    Start-Sleep -Seconds 60
   }
 
   if ($Activate) {
@@ -99,18 +126,18 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   }
 
   # Включаем IMAP
-  $cas = Get-CASMailbox -Identity $UserEmail -ErrorAction Stop
+  $cas = Get-CASMailbox -Identity $mailboxIdentity -ErrorAction Stop
   if (-not $cas.ImapEnabled) {
-    Set-CASMailbox -Identity $UserEmail -ImapEnabled $true -ErrorAction Stop
+    Set-CASMailbox -Identity $mailboxIdentity -ImapEnabled $true -ErrorAction Stop
     Write-Host "IMAP включён."
   } else {
     Write-Host "IMAP уже включён."
   }
 
   # FullAccess для админа
-  $perm = Get-MailboxPermission -Identity $UserEmail | Where-Object { $_.User -eq $AdminLogin -and $_.AccessRights -contains 'FullAccess' -and -not $_.IsInherited }
+  $perm = Get-MailboxPermission -Identity $mailboxIdentity | Where-Object { $_.User -eq $AdminLogin -and $_.AccessRights -contains 'FullAccess' -and -not $_.IsInherited }
   if (-not $perm) {
-    Add-MailboxPermission -Identity $UserEmail -User $AdminLogin -AccessRights FullAccess -InheritanceType All -AutoMapping:$false | Out-Null
+    Add-MailboxPermission -Identity $mailboxIdentity -User $AdminLogin -AccessRights FullAccess -InheritanceType All -AutoMapping:$false | Out-Null
     Write-Host "FullAccess выдан $AdminLogin."
   } else {
     Write-Host "FullAccess уже есть."
