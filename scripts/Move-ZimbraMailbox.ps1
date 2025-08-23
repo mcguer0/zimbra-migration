@@ -54,10 +54,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         $TempEmail = "$AliasTemp@$Domain"
         try {
           Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
-          $adTemp = Get-ADUser -Identity $AliasTemp -Properties DistinguishedName -ErrorAction Stop
-          Rename-ADObject -Identity $adTemp.DistinguishedName -NewName $Alias -ErrorAction Stop
-          Set-ADUser -Identity $adTemp -SamAccountName $Alias -UserPrincipalName $UserEmail -ErrorAction Stop
+          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -Alias $Alias -ErrorAction Stop
         } catch {
           Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
         }
@@ -78,9 +75,9 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     if ($Activate) {
       Write-Warning "Временный mailbox $TempEmail не найден."
     } elseif ($Staged -and $contact) {
-      Write-Host "Mailbox не найден. Enable-Mailbox для '$AliasTemp'..."
-      Enable-Mailbox -Identity $AliasTemp -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
-      Disable-ADAccount -Identity $AliasTemp -ErrorAction Stop
+      Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
+      Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
+      Disable-ADAccount -Identity $Alias -ErrorAction Stop
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
     } else {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
