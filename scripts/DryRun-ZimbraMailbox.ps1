@@ -8,16 +8,6 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
 
   Write-Host "=== Dry run for $UserEmail ==="
 
-  # Проверка почтового контакта
-  $mailContact = $null
-  try { $mailContact = Get-MailContact -Identity $UserEmail -ErrorAction Stop } catch {}
-  if (-not $mailContact) { try { $mailContact = Get-Contact -Identity $UserEmail -ErrorAction Stop } catch {} }
-  if ($mailContact) {
-    Write-Host "MailContact найден: $($mailContact.Identity)"
-  } else {
-    Write-Host "MailContact не найден."
-  }
-
   # Проверка mailbox
   $mailbox = $null
   try { $mailbox = Get-Mailbox -Identity $UserEmail -ErrorAction Stop } catch {}
@@ -26,22 +16,6 @@ function Invoke-DryRunZimbraMailbox([string]$UserInput) {
   } else {
     Write-Host "Mailbox не найден."
   }
-
-  # Сбор членств в рассылках
-  $groups = @()
-  try {
-    $groups = Get-DistributionGroupsByMember $UserEmail |
-      Select-Object DisplayName,PrimarySmtpAddress |
-      Sort-Object DisplayName
-  } catch {}
-
-  if ($groups -and $groups.Count -gt 0) {
-    $info = $groups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
-    Write-Host ("Состоит в {0} рассылк(ах): {1}" -f $groups.Count, ($info -join ", "))
-  } else {
-    Write-Host "Не состоит ни в одной рассылке (AD-группе)."
-  }
-
   # Тестовое подключение к серверам
   Write-Host "`n=== Проверка подключений ==="
   $tests = @(
