@@ -31,6 +31,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
             Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
+        $AliasTemp = "${Alias}_1"
+        $TempEmail = "$AliasTemp@$Domain"
         Write-Host "Контакт остаётся до финального запуска."
       } elseif ($Activate) {
         Write-Host "Удаляю контакт $UserEmail..."
@@ -48,6 +50,17 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
             Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
+        $AliasTemp = "${Alias}_1"
+        $TempEmail = "$AliasTemp@$Domain"
+        try {
+          Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
+          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
+          $adTemp = Get-ADUser -Identity $AliasTemp -Properties DistinguishedName -ErrorAction Stop
+          Rename-ADObject -Identity $adTemp.DistinguishedName -NewName $Alias -ErrorAction Stop
+          Set-ADUser -Identity $adTemp -SamAccountName $Alias -UserPrincipalName $UserEmail -ErrorAction Stop
+        } catch {
+          Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
+        }
       } else {
         Write-Host "Контакт остаётся (не указан -Activate)."
       }
@@ -58,17 +71,27 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
     # Mailbox: существует?
   try {
-    $null = Get-Mailbox -Identity $UserEmail -ErrorAction Stop
+    $mailboxIdentity = if ($Activate) { $TempEmail } else { $UserEmail }
+    $null = Get-Mailbox -Identity $mailboxIdentity -ErrorAction Stop
     Write-Host "Mailbox уже существует."
   } catch {
-    Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
-    Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
-    if ($Staged) {
-      Disable-ADAccount -Identity $Alias -ErrorAction Stop
-      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+    if ($Activate) {
+      Write-Warning "Временный mailbox $TempEmail не найден."
+    } elseif ($Staged -and $contact) {
+      Write-Host "Mailbox не найден. Enable-Mailbox для '$AliasTemp'..."
+      Enable-Mailbox -Identity $AliasTemp -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
+      Disable-ADAccount -Identity $AliasTemp -ErrorAction Stop
+      Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+    } else {
+      Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
+      Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
+      if ($Staged) {
+        Disable-ADAccount -Identity $Alias -ErrorAction Stop
+        Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      }
+      Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
+      Start-Sleep -Seconds 60
     }
-    Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
-    Start-Sleep -Seconds 60
   }
 
   if ($Activate) {
