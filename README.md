@@ -90,7 +90,7 @@ $UpnSuffix              = "example.com"
 ## Как это работает (поток для каждого пользователя)
 
 1. Нормализует адрес: `user` → `user@$Domain`.
-2. Проверяет mailbox в Exchange; если нет — **Enable-Mailbox** и пауза 60 сек.
+2. Проверяет mailbox в Exchange; если нет — **Enable-Mailbox** (при `-Staged` отключает учётную запись и скрывает её из адресных списков) и пауза 60 сек.
 3. Приводит UPN к `$UpnSuffix` (например, `mailtest@example.com`).
 4. Включает IMAP: `Set-CASMailbox -ImapEnabled $true`.
 5. Выдаёт FullAccess администратору `$AdminLogin`.
