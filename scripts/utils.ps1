@@ -29,6 +29,28 @@ function Get-DistributionGroupsByMember([string]$mail) {
     return @()
   }
 
-  Get-DistributionGroup -Filter "Members -eq '$($recipient.DistinguishedName)'" -ResultSize Unlimited
-}
+  $dn = $recipient.DistinguishedName
+  $escapedDn = $dn -replace "'", "''"
 
+  # 1) пробуем OPATH (быстро)
+  $groups = @()
+  try {
+    $groups = Get-DistributionGroup -Filter "Members -eq '$escapedDn'" -ResultSize Unlimited
+  } catch {
+    $groups = @()
+  }
+
+  # 2) если пусто — резерв через AD/LDAP (надёжно)
+  if (-not $groups -or $groups.Count -eq 0) {
+    try {
+      $groups = Get-ADGroup -LDAPFilter "(member=$dn)" -Properties mail,displayName,distinguishedName
+    } catch {
+      $groups = @()
+    }
+  }
+
+  $groups | Select-Object `
+    @{n='DisplayName';e={$_.DisplayName}},
+    @{n='PrimarySmtpAddress';e={ if ($_.PrimarySmtpAddress) { $_.PrimarySmtpAddress } else { $_.mail } }},
+    @{n='DistinguishedName';e={$_.DistinguishedName}}
+}
