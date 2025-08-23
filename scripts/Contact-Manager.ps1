@@ -1,4 +1,4 @@
-[CmdletBinding(DefaultParameterSetName="Search")]
+﻿[CmdletBinding(DefaultParameterSetName="Search")]
 param(
   [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
   [string]$Export,
@@ -65,8 +65,8 @@ if ($PSCmdlet.ParameterSetName -eq "Export") {
         @{n='StateOrProvince';e={$_.st}},
         @{n='PostalCode';e={$_.postalCode}},
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
-        @{n='HiddenFromAddressListsEnabled';e={$false}},
-        @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
+        @{n='HiddenFromAddressListsEnabled';e={$false}} |
+ #       @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
     Export-Csv -Path $Export -NoTypeInformation -Encoding UTF8
   return
 }
