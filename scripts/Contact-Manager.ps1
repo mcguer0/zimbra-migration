@@ -1,4 +1,4 @@
-[CmdletBinding(DefaultParameterSetName="Search")]
+﻿[CmdletBinding(DefaultParameterSetName="Search")]
 param(
   [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
   [string]$Export,
