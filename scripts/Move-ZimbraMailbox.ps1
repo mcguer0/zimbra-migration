@@ -84,6 +84,11 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      try {
+        Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
+      } catch {
+        Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
+      }
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
       Start-Sleep -Seconds 60
     } else {
