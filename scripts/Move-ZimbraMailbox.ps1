@@ -25,8 +25,13 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         Write-Host "Добавляю пользователя в группы контакта..."
         foreach ($g in $contactGroups) {
           try {
-            Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop
-            Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
+            if ($members.PrimarySmtpAddress -notcontains $UserEmail) {
+              Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction SilentlyContinue
+              Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+            } else {
+              Write-Host "Пользователь уже состоит в группе $($g.PrimarySmtpAddress)"
+            }
           } catch {
             Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
@@ -54,7 +59,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         $TempEmail = "$AliasTemp@$Domain"
         try {
           Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -Alias $Alias -ErrorAction Stop
+          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
+          Set-Mailbox $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
         } catch {
           Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
         }
@@ -77,7 +83,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     } elseif ($Staged -and $contact) {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
-      Disable-ADAccount -Identity $Alias -ErrorAction Stop
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
       Start-Sleep -Seconds 60
@@ -85,7 +90,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
       if ($Staged) {
-        Disable-ADAccount -Identity $Alias -ErrorAction Stop
         Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
       }
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
@@ -95,7 +99,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   if ($Activate) {
     try {
-      Enable-ADAccount -Identity $Alias -ErrorAction Stop
       Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Write-Host "Учетная запись активирована."
     } catch {
