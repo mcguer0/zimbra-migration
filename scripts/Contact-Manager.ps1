@@ -1,4 +1,4 @@
-﻿[CmdletBinding(DefaultParameterSetName="Search")]
+[CmdletBinding(DefaultParameterSetName="Search")]
 param(
   [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
   [string]$Export,
@@ -235,12 +235,20 @@ if ($PSCmdlet.ParameterSetName -eq "Search") {
     return
   }
 
-  Write-Host "Контакт найден: $($contact.PrimarySmtpAddress)" -ForegroundColor Green
-  $groups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'"
-  if ($groups) {
-    Write-Host "Состоит в группах:" -ForegroundColor Cyan
-    $groups | ForEach-Object { Write-Host $_.PrimarySmtpAddress }
-  } else {
-    Write-Host "Не состоит ни в одной группе рассылки."
+    $addr = if ($contact.PrimarySmtpAddress) { $contact.PrimarySmtpAddress } else { $contact.Name }
+    Write-Host "Контакт найден: $addr" -ForegroundColor Green
+    try {
+      $adGroups = Get-ADPrincipalGroupMembership -Identity $contact.DistinguishedName -ErrorAction Stop
+      $groups = foreach ($g in $adGroups) {
+        Get-ADGroup -Identity $g.DistinguishedName -Properties mail | Where-Object { $_.mail }
+      }
+    } catch {
+      Write-Warning $_.Exception.Message
+    }
+    if ($groups) {
+      Write-Host "Состоит в группах:" -ForegroundColor Cyan
+      $groups | ForEach-Object { Write-Host $_.mail }
+    } else {
+      Write-Host "Не состоит ни в одной группе рассылки."
+    }
   }
-}

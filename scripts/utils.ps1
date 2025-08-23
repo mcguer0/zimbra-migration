@@ -1,4 +1,4 @@
-﻿﻿# Экспортирует: Ensure-Module, New-SSHSess
+# Экспортирует: Ensure-Module, New-SSHSess
 
 function Ensure-Module([string]$Name) {
   if (-not (Get-Module -ListAvailable -Name $Name)) {
