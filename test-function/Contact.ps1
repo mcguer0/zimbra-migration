@@ -1,16 +1,16 @@
 [CmdletBinding(DefaultParameterSetName="Export")]
 param(
-  [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="РџСѓС‚СЊ Рє CSV РґР»СЏ СЌРєСЃРїРѕСЂС‚Р°")]
+  [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
   [string]$Export,
 
   [Parameter(ParameterSetName="Export")]
-  [string]$SourceOU = "DC=example,DC=com",
+  [string]$SourceOU = "OU=МЕТАЛЛ-ЗАВОД,DC=metall-zavod,DC=local",
 
-  [Parameter(ParameterSetName="Import", Mandatory=$true, HelpMessage="РџСѓС‚СЊ Рє CSV РґР»СЏ РёРјРїРѕСЂС‚Р°")]
+  [Parameter(ParameterSetName="Import", Mandatory=$true, HelpMessage="Путь к CSV для импорта")]
   [string]$Import,
 
   [Parameter(ParameterSetName="Import")]
-  [string]$TargetOU = "OU=ExternalContacts,DC=example,DC=com"
+  [string]$TargetOU = "OU=ZimbraContactsForExchange,OU=AdressBook,DC=metall-zavod,DC=local"
 )
 
 if ($PSCmdlet.ParameterSetName -eq "Export") {
@@ -38,7 +38,7 @@ if ($PSCmdlet.ParameterSetName -eq "Export") {
         @{n='PostalCode';e={$_.postalCode}},
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
         @{n='HiddenFromAddressListsEnabled';e={$false}},
-        @{n='Notes';e={ if ($_.info) { $_.info } else { 'РРјРїРѕСЂС‚РёСЂРѕРІР°РЅ РёР· AD' } }} |
+        @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
     Export-Csv -Path $Export -NoTypeInformation -Encoding UTF8
 
   Import-Csv $Export | Measure-Object
@@ -67,7 +67,7 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
       if ($email)     { $email = $email.Trim() }
 
       if ([string]::IsNullOrWhiteSpace($email)) {
-          Write-Warning ("SKIP: '{0}' вЂ” РїСѓСЃС‚РѕР№ ExternalEmailAddress" -f $name); $skipped++; continue
+          Write-Warning ("SKIP: '{0}' — пустой ExternalEmailAddress" -f $name); $skipped++; continue
       }
 
       $alias = $aliasCsv
@@ -93,7 +93,7 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
           }
           catch {
               $msg = $_.Exception.Message
-              if ($msg -match 'already exists|СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚|Object .* already exists') {
+              if ($msg -match 'already exists|уже существует|Object .* already exists') {
                   $mc = $null
                   $mc = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
                   if (-not $mc) { $mc = Get-MailContact -Filter "PrimarySmtpAddress -eq '$email'" -ErrorAction SilentlyContinue }
@@ -119,10 +119,10 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
                   }
 
                   if (-not $mc) {
-                      Write-Warning ("CONFLICT: '{0}' <{1}> вЂ” РѕР±СЉРµРєС‚ СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СЃСѓС‰РµСЃС‚РІСѓРµС‚, РЅРѕ РїРѕ РїРѕС‡С‚Рµ РЅРµ РЅР°Р№РґРµРЅ. РџСЂРѕРїСѓСЃРє." -f $name,$email)
+                      Write-Warning ("CONFLICT: '{0}' <{1}> — объект с таким именем существует, но по почте не найден. Пропуск." -f $name,$email)
                       $skipped++; continue
                   } else {
-                      Write-Warning ("FOUND-EXISTING: '{0}' СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚; РѕР±РЅРѕРІР»СЏСЋ." -f $name)
+                      Write-Warning ("FOUND-EXISTING: '{0}' уже существует; обновляю." -f $name)
                   }
               } else {
                   Write-Warning ("ERROR create '{0}' <{1}>: {2}" -f $name,$email,$msg)

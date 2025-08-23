@@ -1,2 +1,4 @@
 scripts/config.ps1
 ImapSyncLogs
+scripts/contacts.csv
+test-function/test.csv
