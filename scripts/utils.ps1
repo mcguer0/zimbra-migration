@@ -1,4 +1,4 @@
-﻿# Экспортирует: Ensure-Module, New-SSHSess, Get-DistributionGroupsByMember
+﻿﻿# Экспортирует: Ensure-Module, New-SSHSess
 
 function Ensure-Module([string]$Name) {
   if (-not (Get-Module -ListAvailable -Name $Name)) {
@@ -18,39 +18,4 @@ function New-SSHSess([string]$SshHost,[string]$SshUser,[string]$SshPass) {
   if ($res -is [System.Array]) { $res = $res[0] }
   if (-not $res) { throw "Не удалось открыть SSH к $SshHost" }
   return $res
-}
-
-function Get-DistributionGroupsByMember([string]$mail) {
-  if (-not $mail) { return @() }
-
-  try {
-    $recipient = Get-Recipient -Identity $mail -ErrorAction Stop
-  } catch {
-    return @()
-  }
-
-  $dn = $recipient.DistinguishedName
-  $escapedDn = $dn -replace "'", "''"
-
-  # 1) пробуем OPATH (быстро)
-  $groups = @()
-  try {
-    $groups = Get-DistributionGroup -Filter "Members -eq '$escapedDn'" -ResultSize Unlimited
-  } catch {
-    $groups = @()
-  }
-
-  # 2) если пусто — резерв через AD/LDAP (надёжно)
-  if (-not $groups -or $groups.Count -eq 0) {
-    try {
-      $groups = Get-ADGroup -LDAPFilter "(member=$dn)" -Properties mail,displayName,distinguishedName
-    } catch {
-      $groups = @()
-    }
-  }
-
-  $groups | Select-Object `
-    @{n='DisplayName';e={$_.DisplayName}},
-    @{n='PrimarySmtpAddress';e={ if ($_.PrimarySmtpAddress) { $_.PrimarySmtpAddress } else { $_.mail } }},
-    @{n='DistinguishedName';e={$_.DistinguishedName}}
 }

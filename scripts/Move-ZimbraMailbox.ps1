@@ -8,49 +8,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
 
   Write-Host "=== Подготовка ящика в Exchange для $UserEmail ==="
 
-  # Проверка почтового контакта и сбор его членств в рассылках (если есть), затем отключение контакта. PS 5.1 совместимо
-  $contactGroups = @()   # сюда соберём рассылки (AD-группы), где состоит контакт
-  try {
-    $mailContact = $null
-    try { $mailContact = Get-Contact -Identity $UserEmail -ErrorAction Stop } catch {}
-    if (-not $mailContact) { try { $mailContact = Get-MailContact -Identity $UserEmail -ErrorAction Stop } catch {} }
-
-    if ($mailContact) {
-      Write-Host "Найден MailContact: $($mailContact.Identity) — проверяю членства в рассылках..."
-      $contactGroups = Get-DistributionGroupsByMember $UserEmail |
-        Select-Object DisplayName,PrimarySmtpAddress,DistinguishedName |
-        Sort-Object DisplayName
-      if ($contactGroups -and $contactGroups.Count -gt 0) {
-        $groupList = $contactGroups | ForEach-Object { "{0}/{1}" -f $_.DisplayName, $_.PrimarySmtpAddress }
-        Write-Host ("Контакт состоит в {0} групп(ах): {1}" -f $contactGroups.Count, ($groupList -join ", "))
-      } else {
-        Write-Host "Контакт не состоит ни в одной рассылке (AD-группе)."
-      }
-
-      # Теперь удаляем сам почтовый контакт
-      try {
-        Remove-MailContact -Identity $mailContact.Identity -Confirm:$false -ErrorAction Stop
-        Write-Host "MailContact удалён: $($mailContact.Identity)"
-
-        if ($mailContact.DistinguishedName) {
-          try {
-            Remove-ADObject -Identity $mailContact.DistinguishedName -Confirm:$false -ErrorAction Stop
-            Write-Host "AD-объект контакта удалён: $($mailContact.DistinguishedName)"
-          } catch {
-            Write-Warning "Не удалось удалить AD-объект контакта '$($mailContact.DistinguishedName)': $($_.Exception.Message)"
-          }
-        }
-      } catch {
-        Write-Warning "Не удалось удалить MailContact '$($mailContact.Identity)': $($_.Exception.Message)"
-      }
-    } else {
-      Write-Host "MailContact не найден для $UserEmail (ok)"
-    }
-  } catch {
-    Write-Warning "Проверка/удаление MailContact завершилась ошибкой: $($_.Exception.Message)"
-  }
-
-  # Mailbox: существует?
+    # Mailbox: существует?
   try {
     $null = Get-Mailbox -Identity $UserEmail -ErrorAction Stop
     Write-Host "Mailbox уже существует."
@@ -74,20 +32,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput) {
       Write-Host "UPN уже корректный: $desiredUpn"
     }
 
-    # Если ранее был найден и отключён MailContact, и мы собрали список его рассылок —
-    # добавляем текущего пользователя (AD user) в эти группы
-    if ($contactGroups -and $contactGroups.Count -gt 0) {
-      Write-Host "Добавляю пользователя $($adUser.SamAccountName) в рассылки вместо контакта..."
-      foreach ($g in $contactGroups) {
-          try {
-            Add-ADGroupMember -Identity $g.DistinguishedName -Members $adUser -ErrorAction Stop
-            Write-Host "  + $($g.DisplayName) — добавлен"
-          } catch {
-            # Если уже член — подавим ошибку с понятным сообщением
-            Write-Warning ("  ! {0} — {1}" -f $g.DisplayName, $_.Exception.Message)
-          }
-      }
-    }
   } catch {
     Write-Warning "Не удалось привести UPN к $UpnSuffix для '$Alias': $($_.Exception.Message)"
   }
