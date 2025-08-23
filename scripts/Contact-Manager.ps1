@@ -227,7 +227,13 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
 
 # == Поиск контакта и отображение групп ==
 if ($PSCmdlet.ParameterSetName -eq "Search") {
-  if ($User -notlike "*@*") { $User = "$User@$Domain" }
+  if ($User -notlike "*@*") {
+    if ([string]::IsNullOrWhiteSpace($Domain)) {
+      Write-Host "Не задан Domain (config.ps1). Укажите полный адрес user@example.com." -ForegroundColor Red
+      return
+    }
+    $User = "$User@$Domain"
+  }
 
   $contact = Get-MailContact -Identity $User -ErrorAction SilentlyContinue
   if (-not $contact) {
