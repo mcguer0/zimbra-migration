@@ -10,7 +10,7 @@
 - при запуске с `-Dryrun` выполняет сухой прогон: проверяет наличие mailbox и подключение к серверам;
 - при использовании `-Force` переименовывает старый ящик в Zimbra (`user_old@domain`);
 - при использовании `-Force` создаёт/обновляет `transport` в **PMG**;
-- приводит **UPN (Имя для входа)** к суффиксу `mtzd.ru` (или `$UpnSuffix` из конфига);
+- приводит **UPN (Имя для входа)** к суффиксу `example.com` (или `$UpnSuffix` из конфига);
 - пишет подробные логи на Windows и на сервере Zimbra.
 
 ---
@@ -26,7 +26,7 @@
 ```
 # список к миграции
 ivan.petrov
-maria.ivanova@mtzd.ru
+maria.ivanova@example.com
 ```
 
 ---
@@ -59,20 +59,20 @@ Install-Module Posh-SSH -Scope AllUsers -Force
 Откройте и заполните ключевые поля:
 
 ```powershell
-$Domain                 = "mtzd.ru"
+$Domain                 = "example.com"
 $AdminLogin             = "EXCH\imapadmin"        # учётка, получающая FullAccess и IMAP proxy-auth
 
-$ExchangeImapHost       = "mail01.mtzd.ru"
-$ZimbraImapHost         = "zimbra.mtzd.ru"
+$ExchangeImapHost       = "mail01.example.com"
+$ZimbraImapHost         = "zimbra.example.com"
 
 $AdminImapPasswordPlain = "SuperSecret"
 
-$ZimbraSshHost          = "zimbra.mtzd.ru"
+$ZimbraSshHost          = "zimbra.example.com"
 $ZimbraSshUser          = "root"
 $ZimbraSshPasswordPlain = "RootPass"
 $ImapSyncPath           = "/usr/bin/imapsync"
 
-$PMGHost                = "pmg.mtzd.ru"
+$PMGHost                = "pmg.example.com"
 $PMGUser                = "root"
 $PMGPasswordPlain       = "RootPass"
 
@@ -80,7 +80,7 @@ $LocalLogDir            = ".\ImapSyncLogs"
 $ExchangeMgmtHost       = "localhost"
 
 # Важно для «Имя для входа» (UPN):
-$UpnSuffix              = "mtzd.ru"
+$UpnSuffix              = "example.com"
 ```
 
 > Пароли хранятся в открытом виде. Ограничьте доступ к файлам NTFS-правами. При желании можно позже перевести на хранилище учётных данных.
@@ -91,7 +91,7 @@ $UpnSuffix              = "mtzd.ru"
 
 1. Нормализует адрес: `user` → `user@$Domain`.
 2. Проверяет mailbox в Exchange; если нет — **Enable-Mailbox** и пауза 60 сек.
-3. Приводит UPN к `$UpnSuffix` (например, `mailtest@mtzd.ru`).
+3. Приводит UPN к `$UpnSuffix` (например, `mailtest@example.com`).
 4. Включает IMAP: `Set-CASMailbox -ImapEnabled $true`.
 5. Выдаёт FullAccess администратору `$AdminLogin`.
 6. На Zimbra по SSH готовит и запускает **imapsync** с повторами и логированием (stream в файл в `$LocalLogDir`).
@@ -113,7 +113,7 @@ $UpnSuffix              = "mtzd.ru"
 ```powershell
 .\Migration-Mailbox.ps1 -User ivan.petrov
 # или явный адрес
-.\Migration-Mailbox.ps1 -User ivan.petrov@mtzd.ru
+.\Migration-Mailbox.ps1 -User ivan.petrov@example.com
 ```
 
 ### Пакетный режим
@@ -152,9 +152,9 @@ $UpnSuffix              = "mtzd.ru"
 В Exchange:
 
 ```powershell
-Get-Mailbox -Identity ivan.petrov@mtzd.ru
-Get-CASMailbox -Identity ivan.petrov@mtzd.ru | fl ImapEnabled
-Get-MailboxPermission -Identity ivan.petrov@mtzd.ru | ? {$_.User -match 'imapadmin'}
+Get-Mailbox -Identity ivan.petrov@example.com
+Get-CASMailbox -Identity ivan.petrov@example.com | fl ImapEnabled
+Get-MailboxPermission -Identity ivan.petrov@example.com | ? {$_.User -match 'imapadmin'}
 ```
 
 В AD (UPN):
@@ -166,14 +166,14 @@ Get-ADUser -LDAPFilter "(sAMAccountName=ivan.petrov)" -Properties userPrincipalN
 В PMG (по SSH):
 
 ```bash
-grep "^ivan.petrov@mtzd.ru" /etc/pmg/transport
-postmap -q "ivan.petrov@mtzd.ru" /etc/pmg/transport
+grep "^ivan.petrov@example.com" /etc/pmg/transport
+postmap -q "ivan.petrov@example.com" /etc/pmg/transport
 ```
 
 В Zimbra (по SSH):
 
 ```bash
-su - zimbra -c 'zmprov ga ivan.petrov_old@mtzd.ru | egrep "mail|zimbraMailAlias"'
+su - zimbra -c 'zmprov ga ivan.petrov_old@example.com | egrep "mail|zimbraMailAlias"'
 ```
 
 ---

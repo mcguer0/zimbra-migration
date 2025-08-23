@@ -1,7 +1,7 @@
 ﻿[CmdletBinding(DefaultParameterSetName="Single")]
 param(
   # Режим 1: один пользователь
-  [Parameter(ParameterSetName="Single", Mandatory=$true, HelpMessage="user или user@mtzd.ru")]
+  [Parameter(ParameterSetName="Single", Mandatory=$true, HelpMessage="user или user@example.com")]
   [string]$User,
 
   # Режим 2: пакетный (файл со списком пользователей)
