@@ -61,7 +61,7 @@ function Invoke-OneUser([string]$UserInput) {
   }
 
   # Выполняем перенос
-  $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged
+  $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged -Activate:$Force
   $UserEmail = $move.UserEmail
   $Alias     = $move.Alias
 

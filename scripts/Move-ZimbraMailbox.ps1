@@ -1,7 +1,7 @@
 ﻿# Требует: config.ps1, utils.ps1
 # Экспортирует: Invoke-MoveZimbraMailbox
 
-function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged) {
+function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$Activate) {
   # Нормализация user/email
   if ($UserInput -like "*@*") { $UserEmail = $UserInput; $Alias = ($UserInput -split "@")[0] }
   else                        { $Alias = $UserInput; $UserEmail = "$UserInput@$Domain" }
@@ -32,7 +32,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged) {
           }
         }
         Write-Host "Контакт остаётся до финального запуска."
-      } else {
+      } elseif ($Activate) {
         Write-Host "Удаляю контакт $UserEmail..."
         Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
         Write-Host "Контакт удалён. Проверяю членство пользователя..."
@@ -48,6 +48,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged) {
             Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
+      } else {
+        Write-Host "Контакт остаётся (не указан -Activate)."
       }
     }
   } catch {
@@ -67,6 +69,16 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged) {
     }
     Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
     Start-Sleep -Seconds 60
+  }
+
+  if ($Activate) {
+    try {
+      Enable-ADAccount -Identity $Alias -ErrorAction Stop
+      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Write-Host "Учетная запись активирована."
+    } catch {
+      Write-Warning ("Не удалось активировать учетную запись {0}: {1}" -f $Alias, $_.Exception.Message)
+    }
   }
 
   # UPN (если задан UpnSuffix — используем его; иначе домен)
