@@ -102,6 +102,15 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     }
   }
 
+  if ($Staged) {
+    try {
+      Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
+      Write-Host "Поле mail обновлено: $UserEmail"
+    } catch {
+      Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
+    }
+  }
+
   if ($Activate) {
     try {
       Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
