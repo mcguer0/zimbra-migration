@@ -230,8 +230,8 @@ if ($PSCmdlet.ParameterSetName -eq "Search") {
   if ($User -notlike "*@*") { $User = "$User@$Domain" }
 
   $contact = Get-MailContact -Identity $User -ErrorAction SilentlyContinue
-  if (-not $contact) {
-    Write-Host "Контакт $User не найден." -ForegroundColor Yellow
+  if (-not $contact -or -not $contact.DistinguishedName) {
+    Write-Host "контакт не найден/неполный" -ForegroundColor Yellow
     return
   }
 
