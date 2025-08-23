@@ -1,4 +1,4 @@
-[CmdletBinding(DefaultParameterSetName="Search")]
+﻿[CmdletBinding(DefaultParameterSetName="Search")]
 param(
   [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
   [string]$Export,
@@ -65,8 +65,8 @@ if ($PSCmdlet.ParameterSetName -eq "Export") {
         @{n='StateOrProvince';e={$_.st}},
         @{n='PostalCode';e={$_.postalCode}},
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
-        @{n='HiddenFromAddressListsEnabled';e={$false}},
-        @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
+        @{n='HiddenFromAddressListsEnabled';e={$false}} |
+ #       @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
     Export-Csv -Path $Export -NoTypeInformation -Encoding UTF8
   return
 }
@@ -227,11 +227,17 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
 
 # == Поиск контакта и отображение групп ==
 if ($PSCmdlet.ParameterSetName -eq "Search") {
-  if ($User -notlike "*@*") { $User = "$User@$Domain" }
+  if ($User -notlike "*@*") {
+    if ([string]::IsNullOrWhiteSpace($Domain)) {
+      Write-Host "Не задан Domain (config.ps1). Укажите полный адрес user@example.com." -ForegroundColor Red
+      return
+    }
+    $User = "$User@$Domain"
+  }
 
   $contact = Get-MailContact -Identity $User -ErrorAction SilentlyContinue
-  if (-not $contact) {
-    Write-Host "Контакт $User не найден." -ForegroundColor Yellow
+  if (-not $contact -or -not $contact.DistinguishedName) {
+    Write-Host "контакт не найден/неполный" -ForegroundColor Yellow
     return
   }
 
