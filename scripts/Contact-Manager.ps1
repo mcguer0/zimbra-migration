@@ -1,24 +1,52 @@
-[CmdletBinding(DefaultParameterSetName="Export")]
+[CmdletBinding(DefaultParameterSetName="Search")]
 param(
   [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
   [string]$Export,
 
-  [Parameter(ParameterSetName="Export")]
-  [string]$SourceOU = "DC=example,DC=com",
-
   [Parameter(ParameterSetName="Import", Mandatory=$true, HelpMessage="Путь к CSV для импорта")]
   [string]$Import,
 
-  [Parameter(ParameterSetName="Import")]
-  [string]$TargetOU = "OU=ExternalContacts,DC=example,DC=com"
+  [Parameter(ParameterSetName="Import", HelpMessage="Импортировать только указанный контакт (Alias или почта)")]
+  [string]$Contact,
+
+  [Parameter(ParameterSetName="Search", Mandatory=$true, HelpMessage="user или user@example.com")]
+  [string]$User
 )
 
+# == Подключаем конфиг и функции ==
+. "$PSScriptRoot/config.ps1"
+. "$PSScriptRoot/utils.ps1"
+
+# == Локальные функции ==
+function Ensure-ExchangeCmdlets {
+  if (Get-Command Get-MailContact -ErrorAction SilentlyContinue) { return }
+  Write-Host "Подгружаю Exchange cmdlets..."
+  try {
+    $snap = Get-PSSnapin -Registered -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "Exchange" }
+    if ($snap) {
+      foreach ($s in $snap) { Add-PSSnapin $s.Name -ErrorAction Stop }
+      if (Get-Command Get-MailContact -ErrorAction SilentlyContinue) { return }
+    }
+  } catch {}
+  try {
+    $sess = New-PSSession -ConfigurationName Microsoft.Exchange -ConnectionUri ("http://{0}/PowerShell/" -f $ExchangeMgmtHost) -Authentication Kerberos -ErrorAction Stop
+    Import-PSSession $sess -DisableNameChecking | Out-Null
+    return
+  } catch {
+    throw "Не удалось загрузить Exchange cmdlets (ни snapin, ни remoting). Проверь запуск на сервере Exchange."
+  }
+}
+
+# == Инициализация окружения ==
+Ensure-ExchangeCmdlets
+Ensure-Module ActiveDirectory
+
 if ($PSCmdlet.ParameterSetName -eq "Export") {
-  Get-ADUser -SearchBase $SourceOU `
+  if (-not $ContactsSourceOU) { throw "Не задан ContactsSourceOU в config.ps1" }
+  Get-ADUser -SearchBase $ContactsSourceOU `
              -SearchScope Subtree `
              -LDAPFilter '(&(objectCategory=person)(objectClass=user)(mail=*))' `
-             -Properties mail,displayName,givenName,sn,sAMAccountName,company,department,title,
-                        telephoneNumber,mobile,facsimileTelephoneNumber,streetAddress,l,st,postalCode,co,c,info |
+             -Properties mail,displayName,givenName,sn,sAMAccountName,company,department,title,telephoneNumber,mobile,facsimileTelephoneNumber,streetAddress,l,st,postalCode,co,c,info |
     Select-Object `
         @{n='Name';e={ if ($_.displayName) { $_.displayName } elseif ($_.Name) { $_.Name } else { $_.sAMAccountName } }},
         @{n='DisplayName';e={$_.displayName}},
@@ -40,14 +68,22 @@ if ($PSCmdlet.ParameterSetName -eq "Export") {
         @{n='HiddenFromAddressListsEnabled';e={$false}},
         @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
     Export-Csv -Path $Export -NoTypeInformation -Encoding UTF8
-
-  Import-Csv $Export | Measure-Object
   return
 }
 
 if ($PSCmdlet.ParameterSetName -eq "Import") {
+  if (-not $ContactsTargetOU) { throw "Не задан ContactsTargetOU в config.ps1" }
   if (-not (Test-Path $Import)) { throw "CSV not found: $Import" }
   $rows = Import-Csv -Path $Import
+  if ($Contact) {
+    $rows = $rows | Where-Object {
+      ($_.Alias -eq $Contact) -or
+      ($_.ExternalEmailAddress -eq $Contact) -or
+      ($_.DisplayName -eq $Contact) -or
+      ($_.Name -eq $Contact)
+    }
+    if (-not $rows) { Write-Warning "Контакт $Contact не найден в CSV"; return }
+  }
 
   $created=0; $updated=0; $skipped=0
 
@@ -85,9 +121,9 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
       if (-not $mc) {
           try {
               if ($alias) {
-                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $TargetOU -FirstName $firstName -LastName $lastName -Alias $alias -ErrorAction Stop
+                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $ContactsTargetOU -FirstName $firstName -LastName $lastName -Alias $alias -ErrorAction Stop
               } else {
-                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $TargetOU -FirstName $firstName -LastName $lastName -ErrorAction Stop
+                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $ContactsTargetOU -FirstName $firstName -LastName $lastName -ErrorAction Stop
               }
               $created++; Write-Host ("CREATED: {0} <{1}>" -f $name,$email)
           }
@@ -186,4 +222,25 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
   Write-Host ("Created: {0}" -f $created)
   Write-Host ("Updated: {0}" -f $updated)
   Write-Host ("Skipped: {0}" -f $skipped)
+  return
+}
+
+# == Поиск контакта и отображение групп ==
+if ($PSCmdlet.ParameterSetName -eq "Search") {
+  if ($User -notlike "*@*") { $User = "$User@$Domain" }
+
+  $contact = Get-MailContact -Identity $User -ErrorAction SilentlyContinue
+  if (-not $contact) {
+    Write-Host "Контакт $User не найден." -ForegroundColor Yellow
+    return
+  }
+
+  Write-Host "Контакт найден: $($contact.PrimarySmtpAddress)" -ForegroundColor Green
+  $groups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'"
+  if ($groups) {
+    Write-Host "Состоит в группах:" -ForegroundColor Cyan
+    $groups | ForEach-Object { Write-Host $_.PrimarySmtpAddress }
+  } else {
+    Write-Host "Не состоит ни в одной группе рассылки."
+  }
 }

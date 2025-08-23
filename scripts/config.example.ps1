@@ -4,6 +4,10 @@
 # Домен почты
 $Domain                 = ""
 
+# OU для экспорта и импорта контактов
+$ContactsSourceOU       = ""
+$ContactsTargetOU       = ""
+
 # Админ (используется и как IMAP proxy-auth, и для FullAccess)
 $AdminLogin             = ""
 
