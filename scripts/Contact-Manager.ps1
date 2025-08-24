@@ -187,24 +187,25 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
       }
 
       try {
-          if ($display) { Set-Contact -Identity $mc.Identity -DisplayName $display -ErrorAction SilentlyContinue | Out-Null }
+          # Build parameters for Set-Contact only for non-empty values to avoid binding nulls
+          $scParams = @{ Identity = $mc.Identity; ErrorAction = 'Stop' }
+          if ($display)     { $scParams['DisplayName']      = $display }
+          if ($firstName)   { $scParams['FirstName']       = $firstName }
+          if ($lastName)    { $scParams['LastName']        = $lastName }
+          if ($company)     { $scParams['Company']         = $company }
+          if ($department)  { $scParams['Department']      = $department }
+          if ($title)       { $scParams['Title']           = $title }
+          if ($phone)       { $scParams['Phone']           = $phone }
+          if ($mobile)      { $scParams['MobilePhone']     = $mobile }
+          if ($fax)         { $scParams['Fax']             = $fax }
+          if ($street)      { $scParams['StreetAddress']   = $street }
+          if ($city)        { $scParams['City']            = $city }
+          if ($state)       { $scParams['StateOrProvince'] = $state }
+          if ($postal)      { $scParams['PostalCode']      = $postal }
+          if ($country)     { $scParams['CountryOrRegion'] = $country }
+          if ($notes)       { $scParams['Notes']           = $notes }
 
-          Set-Contact -Identity $mc.Identity `
-              -FirstName $firstName `
-              -LastName $lastName `
-              -Company $company `
-              -Department $department `
-              -Title $title `
-              -Phone $phone `
-              -MobilePhone $mobile `
-              -Fax $fax `
-              -StreetAddress $street `
-              -City $city `
-              -StateOrProvince $state `
-              -PostalCode $postal `
-              -CountryOrRegion $country `
-              -Notes $notes `
-              -ErrorAction SilentlyContinue | Out-Null
+          if ($scParams.Keys.Count -gt 2) { Set-Contact @scParams | Out-Null }
 
           Set-MailContact -Identity $mc.Identity -ExternalEmailAddress $email -ErrorAction SilentlyContinue | Out-Null
           if ($alias -and $mc.Alias -ne $alias) { Set-MailContact -Identity $mc.Identity -Alias $alias -ErrorAction SilentlyContinue | Out-Null }
