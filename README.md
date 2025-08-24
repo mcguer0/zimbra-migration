@@ -223,17 +223,22 @@ su - zimbra -c 'zmprov ga ivan.petrov_old@example.com | egrep "mail|zimbraMailAl
 ## Работа с контактами
 
 ### Экспорт и импорт
-Скрипт `scripts/Contact-Manager.ps1` может экспортировать контакты из Active Directory в CSV и импортировать их в Exchange.
+Скрипт `Contact.ps1` может экспортировать контакты из Active Directory в CSV и импортировать их в Exchange. Все CSV сохраняются в папку `lists` в корне репозитория.
 
 ```powershell
 # Экспорт из AD
-./scripts/Contact-Manager.ps1 -Export contacts.csv
+./Contact.ps1 -Export contacts.csv
 
 # Импорт в OU из CSV
-./scripts/Contact-Manager.ps1 -Import contacts.csv
+./Contact.ps1 -Import contacts.csv
 
 # Импорт только одного контакта
-./scripts/Contact-Manager.ps1 -Import contacts.csv -Contact ivan.petrov@example.com
+./Contact.ps1 -Import contacts.csv -Contact ivan.petrov@example.com
+```
+
+### Экспорт групп рассылки из Zimbra
+```powershell
+./Contact.ps1 -ExportDistributionGroup
 ```
 
 ### Поиск контакта

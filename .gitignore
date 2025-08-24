@@ -3,3 +3,5 @@ ImapSyncLogs
 scripts/contacts.csv
 test-function/test.csv
 test.csv
+lists/*
+!lists/.gitkeep
