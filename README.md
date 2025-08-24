@@ -64,6 +64,11 @@ Install-Module Posh-SSH -Scope AllUsers -Force
 
 ```powershell
 $Domain                 = "example.com"
+# OU для экспорта/импорта контактов и создания групп рассылки
+$ContactsSourceOU       = ""
+$ContactsTargetOU       = ""
+$DistributionGroupsOU   = ""
+
 $AdminLogin             = "EXCH\imapadmin"        # учётка, получающая FullAccess и IMAP proxy-auth
 
 $ExchangeImapHost       = "mail01.example.com"
@@ -244,7 +249,7 @@ su - zimbra -c 'zmprov ga ivan.petrov_old@example.com | egrep "mail|zimbraMailAl
 ```
 
 ### Импорт групп рассылки в Exchange
-CSV из `lists/distribution_list` будут использованы для создания групп и добавления членов, найденных в Exchange.
+CSV из `lists/distribution_list` будут использованы для создания групп в OU `$DistributionGroupsOU` и добавления членов, найденных в Exchange.
 
 ```powershell
 ./Contact.ps1 -ImportGroups
