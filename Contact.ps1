@@ -1,27 +1,29 @@
 [CmdletBinding(DefaultParameterSetName="Export")]
 param(
-  [Parameter(ParameterSetName="Export", HelpMessage="Path to CSV for export")]
-  [string]$Export = "contacts.csv",
+  [Parameter(ParameterSetName="Export", Mandatory=$true)]
+  [switch]$Export,
 
-  [Parameter(ParameterSetName="Export")]
-  [string]$SourceOU = "OU=-,DC=metall-zavod,DC=local",
+  [Parameter(ParameterSetName="Export", HelpMessage="Path to CSV for export")]
+  [string]$ExportPath,
+
+  [Parameter(ParameterSetName="Import", Mandatory=$true)]
+  [switch]$Import,
 
   [Parameter(ParameterSetName="Import", HelpMessage="Path to CSV for import")]
-  [string]$Import = "contacts.csv",
+  [string]$ImportPath,
 
   [Parameter(ParameterSetName="Import", HelpMessage="Import only specified contact (Alias or email)")]
   [string]$Contact,
 
-  [Parameter(ParameterSetName="Import")]
-  [Parameter(ParameterSetName="ImportGroups")]
-  [string]$TargetOU = "OU=ZimbraContactsForExchange,OU=AdressBook,DC=metall-zavod,DC=local",
+  [Parameter(ParameterSetName="ImportGroups", Mandatory=$true)]
+  [switch]$ImportGroups,
 
   [Parameter(ParameterSetName="ExportDistributionGroup", Mandatory=$true)]
-  [switch]$ExportDistributionGroup,
-
-  [Parameter(ParameterSetName="ImportGroups", Mandatory=$true)]
-  [switch]$ImportGroups
+  [switch]$ExportDistributionGroup
 )
+
+. "$PSScriptRoot/scripts/config.ps1"
+. "$PSScriptRoot/scripts/utils.ps1"
 
 $ListsDir = Join-Path $PSScriptRoot 'lists'
 if (-not (Test-Path $ListsDir)) { New-Item -Path $ListsDir -ItemType Directory -Force | Out-Null }
@@ -29,8 +31,11 @@ $DlDir = Join-Path $ListsDir 'distribution_list'
 if (-not (Test-Path $DlDir)) { New-Item -Path $DlDir -ItemType Directory -Force | Out-Null }
 
 if ($PSCmdlet.ParameterSetName -eq 'Export') {
-  if (-not (Split-Path $Export -IsAbsolute)) { $Export = Join-Path $ListsDir $Export }
-  Get-ADUser -SearchBase $SourceOU `
+  Ensure-Module ActiveDirectory
+  if (-not $ContactsSourceOU) { throw "Не задан ContactsSourceOU в config.ps1" }
+  if (-not $ExportPath) { $ExportPath = 'contacts.csv' }
+  if (-not (Split-Path $ExportPath -IsAbsolute)) { $ExportPath = Join-Path $ListsDir $ExportPath }
+  Get-ADUser -SearchBase $ContactsSourceOU `
              -SearchScope Subtree `
              -LDAPFilter '(&(objectCategory=person)(objectClass=user)(mail=*))' `
              -Properties mail,displayName,givenName,sn,sAMAccountName,company,department,title,
@@ -55,16 +60,19 @@ if ($PSCmdlet.ParameterSetName -eq 'Export') {
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
         @{n='HiddenFromAddressListsEnabled';e={$false}},
         @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
-    Export-Csv -Path $Export -NoTypeInformation -Encoding UTF8
+    Export-Csv -Path $ExportPath -NoTypeInformation -Encoding UTF8
 
-  Import-Csv $Export | Measure-Object
+  Import-Csv $ExportPath | Measure-Object
   return
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Import') {
-  if (-not (Split-Path $Import -IsAbsolute)) { $Import = Join-Path $ListsDir $Import }
-  if (-not (Test-Path $Import)) { throw "CSV not found: $Import" }
-  $rows = Import-Csv -Path $Import
+  Ensure-Module ActiveDirectory
+  if (-not $ContactsTargetOU) { throw "Не задан ContactsTargetOU в config.ps1" }
+  if (-not $ImportPath) { $ImportPath = 'contacts.csv' }
+  if (-not (Split-Path $ImportPath -IsAbsolute)) { $ImportPath = Join-Path $ListsDir $ImportPath }
+  if (-not (Test-Path $ImportPath)) { throw "CSV not found: $ImportPath" }
+  $rows = Import-Csv -Path $ImportPath
   if ($Contact) {
     $rows = $rows | Where-Object {
       ($_.Alias -eq $Contact) -or
@@ -111,9 +119,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
       if (-not $mc) {
           try {
               if ($alias) {
-                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $TargetOU -FirstName $firstName -LastName $lastName -Alias $alias -ErrorAction Stop
+                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $ContactsTargetOU -FirstName $firstName -LastName $lastName -Alias $alias -ErrorAction Stop
               } else {
-                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $TargetOU -FirstName $firstName -LastName $lastName -ErrorAction Stop
+                  $mc = New-MailContact -Name $name -ExternalEmailAddress $email -OrganizationalUnit $ContactsTargetOU -FirstName $firstName -LastName $lastName -ErrorAction Stop
               }
               $created++; Write-Host ("CREATED: {0} <{1}>" -f $name,$email)
           }
@@ -216,6 +224,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
+  if (-not $DistributionGroupsOU) { throw "Не задан DistributionGroupsOU в config.ps1" }
   if (-not (Test-Path $DlDir)) { throw "Directory not found: $DlDir" }
   $files = Get-ChildItem -Path $DlDir -Filter '*.csv' -ErrorAction SilentlyContinue
   foreach ($f in $files) {
@@ -228,7 +237,7 @@ if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
       $dg = Get-DistributionGroup -Identity $dl -ErrorAction SilentlyContinue
       if (-not $dg) {
         try {
-          $dg = New-DistributionGroup -Name $alias -Alias $alias -PrimarySmtpAddress $dl -OrganizationalUnit $TargetOU -Type Distribution -ErrorAction Stop
+          $dg = New-DistributionGroup -Name $alias -Alias $alias -PrimarySmtpAddress $dl -OrganizationalUnit $DistributionGroupsOU -Type Distribution -ErrorAction Stop
           Write-Host ("CREATED: {0}" -f $dl)
         } catch {
           Write-Warning ("ERROR create group '{0}': {1}" -f $dl,$_.Exception.Message)
@@ -257,8 +266,6 @@ if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'ExportDistributionGroup') {
-  . "$PSScriptRoot/scripts/config.ps1"
-  . "$PSScriptRoot/scripts/utils.ps1"
   Ensure-Module Posh-SSH
   $sess = New-SSHSess -SshHost $ZimbraSshHost -SshUser $ZimbraSshUser -SshPass $ZimbraSshPasswordPlain
   try {
