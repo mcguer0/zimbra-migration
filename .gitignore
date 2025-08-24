@@ -1,10 +1,8 @@
 scripts/config.ps1
 ImapSyncLogs
-scripts/contacts.csv
-test-function/test.csv
-test.csv
 lists/*
 !lists/.gitkeep
 !lists/contacts.csv
 !lists/distribution_list/
 !lists/distribution_list/.gitkeep
+lists/contacts.csv

@@ -32,7 +32,7 @@ if (-not (Test-Path $DlDir)) { New-Item -Path $DlDir -ItemType Directory -Force 
 
 if ($PSCmdlet.ParameterSetName -eq 'Export') {
   Ensure-Module ActiveDirectory
-  if (-not $ContactsSourceOU) { throw "РќРµ Р·Р°РґР°РЅ ContactsSourceOU РІ config.ps1" }
+  if (-not $ContactsSourceOU) { throw "Не задан ContactsSourceOU в config.ps1" }
   if (-not $ExportPath) { $ExportPath = 'contacts.csv' }
   if (-not (Split-Path $ExportPath -IsAbsolute)) { $ExportPath = Join-Path $ListsDir $ExportPath }
   Get-ADUser -SearchBase $ContactsSourceOU `
@@ -59,7 +59,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Export') {
         @{n='PostalCode';e={$_.postalCode}},
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
         @{n='HiddenFromAddressListsEnabled';e={$false}},
-        @{n='Notes';e={ if ($_.info) { $_.info } else { 'РРјРїРѕСЂС‚РёСЂРѕРІР°РЅ РёР· AD' } }} |
+        @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
     Export-Csv -Path $ExportPath -NoTypeInformation -Encoding UTF8
 
   Import-Csv $ExportPath | Measure-Object
@@ -68,7 +68,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Export') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Import') {
   Ensure-Module ActiveDirectory
-  if (-not $ContactsTargetOU) { throw "РќРµ Р·Р°РґР°РЅ ContactsTargetOU РІ config.ps1" }
+  if (-not $ContactsTargetOU) { throw "Не задан ContactsTargetOU в config.ps1" }
   if (-not $ImportPath) { $ImportPath = 'contacts.csv' }
   if (-not (Split-Path $ImportPath -IsAbsolute)) { $ImportPath = Join-Path $ListsDir $ImportPath }
   if (-not (Test-Path $ImportPath)) { throw "CSV not found: $ImportPath" }
@@ -101,7 +101,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
       if ($email)     { $email = $email.Trim() }
 
       if ([string]::IsNullOrWhiteSpace($email)) {
-          Write-Warning ("SKIP: '{0}' вЂ” РїСѓСЃС‚РѕР№ ExternalEmailAddress" -f $name); $skipped++; continue
+          Write-Warning ("SKIP: '{0}' — пустой ExternalEmailAddress" -f $name); $skipped++; continue
       }
 
       $alias = $aliasCsv
@@ -127,7 +127,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
           }
           catch {
               $msg = $_.Exception.Message
-              if ($msg -match 'already exists|СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚|Object .* already exists') {
+              if ($msg -match 'already exists|уже существует|Object .* already exists') {
                   $mc = $null
                   $mc = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
                   if (-not $mc) { $mc = Get-MailContact -Filter "PrimarySmtpAddress -eq '$email'" -ErrorAction SilentlyContinue }
@@ -153,10 +153,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
                   }
 
                   if (-not $mc) {
-                      Write-Warning ("CONFLICT: '{0}' <{1}> вЂ” РѕР±СЉРµРєС‚ СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СЃСѓС‰РµСЃС‚РІСѓРµС‚, РЅРѕ РїРѕ РїРѕС‡С‚Рµ РЅРµ РЅР°Р№РґРµРЅ. РџСЂРѕРїСѓСЃРє." -f $name,$email)
+                      Write-Warning ("CONFLICT: '{0}' <{1}> — объект с таким именем существует, но по почте не найден. Пропуск." -f $name,$email)
                       $skipped++; continue
                   } else {
-                      Write-Warning ("FOUND-EXISTING: '{0}' СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚; РѕР±РЅРѕРІР»СЏСЋ." -f $name)
+                      Write-Warning ("FOUND-EXISTING: '{0}' уже существует; обновляю." -f $name)
                   }
               } else {
                   Write-Warning ("ERROR create '{0}' <{1}>: {2}" -f $name,$email,$msg)
@@ -224,7 +224,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
-  if (-not $DistributionGroupsOU) { throw "РќРµ Р·Р°РґР°РЅ DistributionGroupsOU РІ config.ps1" }
+  if (-not $DistributionGroupsOU) { throw "Не задан DistributionGroupsOU в config.ps1" }
   if (-not (Test-Path $DlDir)) { throw "Directory not found: $DlDir" }
   $files = Get-ChildItem -Path $DlDir -Filter '*.csv' -ErrorAction SilentlyContinue
   foreach ($f in $files) {
