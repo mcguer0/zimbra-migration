@@ -36,7 +36,7 @@ $PMGUser                = ""
 $PMGPasswordPlain       = ""
 
 # Логи на Windows
-$LocalLogDir            = "$PSScriptRoot\ImapSyncLogs"
+$LocalLogDir            = Join-Path (Split-Path $PSScriptRoot -Parent) 'ImapSyncLogs'
 
 # Хост для подключения к Exchange Management PowerShell (если локально — оставь localhost)
 $ExchangeMgmtHost       = "localhost"

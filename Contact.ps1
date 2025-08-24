@@ -1,19 +1,29 @@
 [CmdletBinding(DefaultParameterSetName="Export")]
 param(
-  [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Путь к CSV для экспорта")]
+  [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Path to CSV for export")]
   [string]$Export,
 
   [Parameter(ParameterSetName="Export")]
-  [string]$SourceOU = "OU=МЕТАЛЛ-ЗАВОД,DC=metall-zavod,DC=local",
+  [string]$SourceOU = "OU=-,DC=metall-zavod,DC=local",
 
-  [Parameter(ParameterSetName="Import", Mandatory=$true, HelpMessage="Путь к CSV для импорта")]
+  [Parameter(ParameterSetName="Import", Mandatory=$true, HelpMessage="Path to CSV for import")]
   [string]$Import,
 
+  [Parameter(ParameterSetName="Import", HelpMessage="Import only specified contact (Alias or email)")]
+  [string]$Contact,
+
   [Parameter(ParameterSetName="Import")]
-  [string]$TargetOU = "OU=ZimbraContactsForExchange,OU=AdressBook,DC=metall-zavod,DC=local"
+  [string]$TargetOU = "OU=ZimbraContactsForExchange,OU=AdressBook,DC=metall-zavod,DC=local",
+
+  [Parameter(ParameterSetName="ExportDistributionGroup", Mandatory=$true)]
+  [switch]$ExportDistributionGroup
 )
 
-if ($PSCmdlet.ParameterSetName -eq "Export") {
+$ListsDir = Join-Path $PSScriptRoot 'lists'
+if (-not (Test-Path $ListsDir)) { New-Item -Path $ListsDir -ItemType Directory -Force | Out-Null }
+
+if ($PSCmdlet.ParameterSetName -eq 'Export') {
+  if (-not (Split-Path $Export -IsAbsolute)) { $Export = Join-Path $ListsDir $Export }
   Get-ADUser -SearchBase $SourceOU `
              -SearchScope Subtree `
              -LDAPFilter '(&(objectCategory=person)(objectClass=user)(mail=*))' `
@@ -38,16 +48,26 @@ if ($PSCmdlet.ParameterSetName -eq "Export") {
         @{n='PostalCode';e={$_.postalCode}},
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
         @{n='HiddenFromAddressListsEnabled';e={$false}},
-        @{n='Notes';e={ if ($_.info) { $_.info } else { 'Импортирован из AD' } }} |
+        @{n='Notes';e={ if ($_.info) { $_.info } else { 'РРјРїРѕСЂС‚РёСЂРѕРІР°РЅ РёР· AD' } }} |
     Export-Csv -Path $Export -NoTypeInformation -Encoding UTF8
 
   Import-Csv $Export | Measure-Object
   return
 }
 
-if ($PSCmdlet.ParameterSetName -eq "Import") {
+if ($PSCmdlet.ParameterSetName -eq 'Import') {
+  if (-not (Split-Path $Import -IsAbsolute)) { $Import = Join-Path $ListsDir $Import }
   if (-not (Test-Path $Import)) { throw "CSV not found: $Import" }
   $rows = Import-Csv -Path $Import
+  if ($Contact) {
+    $rows = $rows | Where-Object {
+      ($_.Alias -eq $Contact) -or
+      ($_.ExternalEmailAddress -eq $Contact) -or
+      ($_.DisplayName -eq $Contact) -or
+      ($_.Name -eq $Contact)
+    }
+    if (-not $rows) { Write-Warning "Contact $Contact not found in CSV"; return }
+  }
 
   $created=0; $updated=0; $skipped=0
 
@@ -67,7 +87,7 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
       if ($email)     { $email = $email.Trim() }
 
       if ([string]::IsNullOrWhiteSpace($email)) {
-          Write-Warning ("SKIP: '{0}' — пустой ExternalEmailAddress" -f $name); $skipped++; continue
+          Write-Warning ("SKIP: '{0}' вЂ” РїСѓСЃС‚РѕР№ ExternalEmailAddress" -f $name); $skipped++; continue
       }
 
       $alias = $aliasCsv
@@ -93,7 +113,7 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
           }
           catch {
               $msg = $_.Exception.Message
-              if ($msg -match 'already exists|уже существует|Object .* already exists') {
+              if ($msg -match 'already exists|СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚|Object .* already exists') {
                   $mc = $null
                   $mc = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
                   if (-not $mc) { $mc = Get-MailContact -Filter "PrimarySmtpAddress -eq '$email'" -ErrorAction SilentlyContinue }
@@ -119,10 +139,10 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
                   }
 
                   if (-not $mc) {
-                      Write-Warning ("CONFLICT: '{0}' <{1}> — объект с таким именем существует, но по почте не найден. Пропуск." -f $name,$email)
+                      Write-Warning ("CONFLICT: '{0}' <{1}> вЂ” РѕР±СЉРµРєС‚ СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СЃСѓС‰РµСЃС‚РІСѓРµС‚, РЅРѕ РїРѕ РїРѕС‡С‚Рµ РЅРµ РЅР°Р№РґРµРЅ. РџСЂРѕРїСѓСЃРє." -f $name,$email)
                       $skipped++; continue
                   } else {
-                      Write-Warning ("FOUND-EXISTING: '{0}' уже существует; обновляю." -f $name)
+                      Write-Warning ("FOUND-EXISTING: '{0}' СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚; РѕР±РЅРѕРІР»СЏСЋ." -f $name)
                   }
               } else {
                   Write-Warning ("ERROR create '{0}' <{1}>: {2}" -f $name,$email,$msg)
@@ -186,4 +206,29 @@ if ($PSCmdlet.ParameterSetName -eq "Import") {
   Write-Host ("Created: {0}" -f $created)
   Write-Host ("Updated: {0}" -f $updated)
   Write-Host ("Skipped: {0}" -f $skipped)
+  return
 }
+
+if ($PSCmdlet.ParameterSetName -eq 'ExportDistributionGroup') {
+  . "$PSScriptRoot/scripts/config.ps1"
+  . "$PSScriptRoot/scripts/utils.ps1"
+  Ensure-Module Posh-SSH
+  $sess = New-SSHSess -SshHost $ZimbraSshHost -SshUser $ZimbraSshUser -SshPass $ZimbraSshPasswordPlain
+  try {
+    $cmd = "bash -lc 'su - zimbra -c \"zmprov gadl\"'"
+    $res = Invoke-SSHCommand -SessionId $sess.SessionId -Command $cmd
+    $lists = $res.Output | Where-Object { $_ }
+    foreach ($dl in $lists) {
+      $cmd2 = ("bash -lc 'su - zimbra -c \"zmprov gdlm {0}\"'" -f $dl)
+      $res2 = Invoke-SSHCommand -SessionId $sess.SessionId -Command $cmd2
+      $members = $res2.Output | Where-Object { $_ }
+      $fileName = ($dl -replace '@','_') -replace '\.','_'
+      $path = Join-Path $ListsDir ($fileName + '.csv')
+      $members | ForEach-Object { [PSCustomObject]@{DistributionList=$dl; Member=$_} } |
+        Export-Csv -Path $path -NoTypeInformation -Encoding UTF8 -Force
+    }
+  } finally {
+    if ($sess) { Remove-SSHSession -SessionId $sess.SessionId | Out-Null }
+  }
+}
+
