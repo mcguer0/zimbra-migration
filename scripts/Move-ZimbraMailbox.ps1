@@ -59,7 +59,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         $TempEmail = "$AliasTemp@$Domain"
         try {
           Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -Alias $Alias -ErrorAction Stop
+          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
+          Set-Mailbox $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
         } catch {
           Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
         }
@@ -82,15 +83,18 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     } elseif ($Staged -and $contact) {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
-      Disable-ADAccount -Identity $Alias -ErrorAction Stop
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
+      try {
+        Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
+      } catch {
+        Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
+      }
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
       Start-Sleep -Seconds 60
     } else {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
       if ($Staged) {
-        Disable-ADAccount -Identity $Alias -ErrorAction Stop
         Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
       }
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
@@ -98,9 +102,17 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     }
   }
 
+  if ($Staged) {
+    try {
+      Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
+      Write-Host "Поле mail обновлено: $UserEmail"
+    } catch {
+      Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
+    }
+  }
+
   if ($Activate) {
     try {
-      Enable-ADAccount -Identity $Alias -ErrorAction Stop
       Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Write-Host "Учетная запись активирована."
     } catch {
