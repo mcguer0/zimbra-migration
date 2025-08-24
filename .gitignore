@@ -5,3 +5,6 @@ test-function/test.csv
 test.csv
 lists/*
 !lists/.gitkeep
+!lists/contacts.csv
+!lists/distribution_list/
+!lists/distribution_list/.gitkeep
