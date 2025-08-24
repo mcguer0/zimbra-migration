@@ -1,26 +1,32 @@
-﻿[CmdletBinding(DefaultParameterSetName="Export")]
+[CmdletBinding(DefaultParameterSetName="Export")]
 param(
-  [Parameter(ParameterSetName="Export", Mandatory=$true, HelpMessage="Path to CSV for export")]
-  [string]$Export,
+  [Parameter(ParameterSetName="Export", HelpMessage="Path to CSV for export")]
+  [string]$Export = "contacts.csv",
 
   [Parameter(ParameterSetName="Export")]
   [string]$SourceOU = "OU=-,DC=metall-zavod,DC=local",
 
-  [Parameter(ParameterSetName="Import", Mandatory=$true, HelpMessage="Path to CSV for import")]
-  [string]$Import,
+  [Parameter(ParameterSetName="Import", HelpMessage="Path to CSV for import")]
+  [string]$Import = "contacts.csv",
 
   [Parameter(ParameterSetName="Import", HelpMessage="Import only specified contact (Alias or email)")]
   [string]$Contact,
 
   [Parameter(ParameterSetName="Import")]
+  [Parameter(ParameterSetName="ImportGroups")]
   [string]$TargetOU = "OU=ZimbraContactsForExchange,OU=AdressBook,DC=metall-zavod,DC=local",
 
   [Parameter(ParameterSetName="ExportDistributionGroup", Mandatory=$true)]
-  [switch]$ExportDistributionGroup
+  [switch]$ExportDistributionGroup,
+
+  [Parameter(ParameterSetName="ImportGroups", Mandatory=$true)]
+  [switch]$ImportGroups
 )
 
 $ListsDir = Join-Path $PSScriptRoot 'lists'
 if (-not (Test-Path $ListsDir)) { New-Item -Path $ListsDir -ItemType Directory -Force | Out-Null }
+$DlDir = Join-Path $ListsDir 'distribution_list'
+if (-not (Test-Path $DlDir)) { New-Item -Path $DlDir -ItemType Directory -Force | Out-Null }
 
 if ($PSCmdlet.ParameterSetName -eq 'Export') {
   if (-not (Split-Path $Export -IsAbsolute)) { $Export = Join-Path $ListsDir $Export }
@@ -209,6 +215,47 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
   return
 }
 
+if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
+  if (-not (Test-Path $DlDir)) { throw "Directory not found: $DlDir" }
+  $files = Get-ChildItem -Path $DlDir -Filter '*.csv' -ErrorAction SilentlyContinue
+  foreach ($f in $files) {
+    $rows = Import-Csv -Path $f.FullName | Where-Object { $_.Member -and $_.Member -notmatch '^#' -and $_.Member -ne 'members' }
+    $grouped = $rows | Group-Object DistributionList
+    foreach ($g in $grouped) {
+      $dl = $g.Name
+      if (-not $dl) { continue }
+      $alias = ($dl -split '@')[0]
+      $dg = Get-DistributionGroup -Identity $dl -ErrorAction SilentlyContinue
+      if (-not $dg) {
+        try {
+          $dg = New-DistributionGroup -Name $alias -Alias $alias -PrimarySmtpAddress $dl -OrganizationalUnit $TargetOU -Type Distribution -ErrorAction Stop
+          Write-Host ("CREATED: {0}" -f $dl)
+        } catch {
+          Write-Warning ("ERROR create group '{0}': {1}" -f $dl,$_.Exception.Message)
+          continue
+        }
+      }
+      foreach ($m in $g.Group) {
+        $member = $m.Member.Trim()
+        $rcp = Get-Recipient -Identity $member -ErrorAction SilentlyContinue
+        if (-not $rcp) {
+          Write-Warning ("SKIP member '{0}' not found in Exchange" -f $member)
+          continue
+        }
+        try {
+          Add-DistributionGroupMember -Identity $dg.Identity -Member $rcp.Identity -ErrorAction Stop
+          Write-Host ("ADDED {0} to {1}" -f $member,$dl)
+        } catch {
+          if ($_.Exception.Message -notmatch 'already a member') {
+            Write-Warning ("ERROR add {0} to {1}: {2}" -f $member,$dl,$_.Exception.Message)
+          }
+        }
+      }
+    }
+  }
+  return
+}
+
 if ($PSCmdlet.ParameterSetName -eq 'ExportDistributionGroup') {
   . "$PSScriptRoot/scripts/config.ps1"
   . "$PSScriptRoot/scripts/utils.ps1"
@@ -223,7 +270,7 @@ if ($PSCmdlet.ParameterSetName -eq 'ExportDistributionGroup') {
       $res2 = Invoke-SSHCommand -SessionId $sess.SessionId -Command $cmd2
       $members = $res2.Output | Where-Object { $_ }
       $fileName = ($dl -replace '@','_') -replace '\.','_'
-      $path = Join-Path $ListsDir ($fileName + '.csv')
+      $path = Join-Path $DlDir ($fileName + '.csv')
       $members | ForEach-Object { [PSCustomObject]@{DistributionList=$dl; Member=$_} } |
         Export-Csv -Path $path -NoTypeInformation -Encoding UTF8 -Force
     }
