@@ -215,11 +215,11 @@ if ($PSCmdlet.ParameterSetName -eq 'ExportDistributionGroup') {
   Ensure-Module Posh-SSH
   $sess = New-SSHSess -SshHost $ZimbraSshHost -SshUser $ZimbraSshUser -SshPass $ZimbraSshPasswordPlain
   try {
-    $cmd = "bash -lc 'su - zimbra -c \"zmprov gadl\"'"
+    $cmd = 'bash -lc ''su - zimbra -c "zmprov gadl"'''
     $res = Invoke-SSHCommand -SessionId $sess.SessionId -Command $cmd
     $lists = $res.Output | Where-Object { $_ }
     foreach ($dl in $lists) {
-      $cmd2 = ("bash -lc 'su - zimbra -c \"zmprov gdlm {0}\"'" -f $dl)
+      $cmd2 = ('bash -lc ''su - zimbra -c "zmprov gdlm {0}"''' -f $dl)
       $res2 = Invoke-SSHCommand -SessionId $sess.SessionId -Command $cmd2
       $members = $res2.Output | Where-Object { $_ }
       $fileName = ($dl -replace '@','_') -replace '\.','_'
