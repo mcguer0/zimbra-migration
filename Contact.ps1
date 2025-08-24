@@ -24,6 +24,7 @@ param(
 
 . "$PSScriptRoot/scripts/config.ps1"
 . "$PSScriptRoot/scripts/utils.ps1"
+. "$PSScriptRoot/scripts/Update-PMGTransport.ps1"
 
 $ListsDir = Join-Path $PSScriptRoot 'lists'
 if (-not (Test-Path $ListsDir)) { New-Item -Path $ListsDir -ItemType Directory -Force | Out-Null }
@@ -245,6 +246,9 @@ if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
           continue
         }
       }
+      $pmg = Update-PMGTransport -UserEmail $dl
+      if ($pmg.Success) { Write-Host ("PMG transport: {0}" -f $pmg.Line) }
+      else { Write-Warning ("PMTransport error for '{0}': {1}" -f $dl,$pmg.Error) }
       foreach ($m in $g.Group) {
         $member = $m.Member.Trim()
         $rcp = Get-Recipient -Identity $member -ErrorAction SilentlyContinue
