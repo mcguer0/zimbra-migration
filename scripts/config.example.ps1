@@ -4,9 +4,11 @@
 # Домен почты
 $Domain                 = ""
 
-# OU для экспорта и импорта контактов
+# OU для экспорта/импорта контактов и создания групп рассылки
 $ContactsSourceOU       = ""
 $ContactsTargetOU       = ""
+# OU для новых групп рассылки (Distribution Groups) в Active Directory
+$DistributionGroupsOU   = ""
 
 # Админ (используется и как IMAP proxy-auth, и для FullAccess)
 $AdminLogin             = ""
@@ -36,7 +38,7 @@ $PMGUser                = ""
 $PMGPasswordPlain       = ""
 
 # Логи на Windows
-$LocalLogDir            = "$PSScriptRoot\ImapSyncLogs"
+$LocalLogDir            = Join-Path (Split-Path $PSScriptRoot -Parent) 'ImapSyncLogs'
 
 # Хост для подключения к Exchange Management PowerShell (если локально — оставь localhost)
 $ExchangeMgmtHost       = "localhost"

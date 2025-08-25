@@ -64,6 +64,11 @@ Install-Module Posh-SSH -Scope AllUsers -Force
 
 ```powershell
 $Domain                 = "example.com"
+# OU для экспорта/импорта контактов и создания групп рассылки
+$ContactsSourceOU       = ""
+$ContactsTargetOU       = ""
+$DistributionGroupsOU   = ""
+
 $AdminLogin             = "EXCH\imapadmin"        # учётка, получающая FullAccess и IMAP proxy-auth
 
 $ExchangeImapHost       = "mail01.example.com"
@@ -223,17 +228,31 @@ su - zimbra -c 'zmprov ga ivan.petrov_old@example.com | egrep "mail|zimbraMailAl
 ## Работа с контактами
 
 ### Экспорт и импорт
-Скрипт `scripts/Contact-Manager.ps1` может экспортировать контакты из Active Directory в CSV и импортировать их в Exchange.
+Скрипт `Contact.ps1` может экспортировать контакты из Active Directory в CSV и импортировать их в Exchange. Все CSV сохраняются в папку `lists` в корне репозитория. По умолчанию используется файл `contacts.csv`.
 
 ```powershell
-# Экспорт из AD
-./scripts/Contact-Manager.ps1 -Export contacts.csv
+# Экспорт из AD в lists/contacts.csv
+./Contact.ps1 -Export
 
-# Импорт в OU из CSV
-./scripts/Contact-Manager.ps1 -Import contacts.csv
+# Импорт в OU из lists/contacts.csv
+./Contact.ps1 -Import
 
 # Импорт только одного контакта
-./scripts/Contact-Manager.ps1 -Import contacts.csv -Contact ivan.petrov@example.com
+./Contact.ps1 -Import -Contact ivan.petrov@example.com
+```
+
+### Экспорт групп рассылки из Zimbra
+Группы сохраняются в `lists/distribution_list`.
+
+```powershell
+./Contact.ps1 -ExportDistributionGroup
+```
+
+### Импорт групп рассылки в Exchange
+CSV из `lists/distribution_list` будут использованы для создания групп в OU `$DistributionGroupsOU` и добавления членов, найденных в Exchange. С ключом `-Force` скрипт также обновит запись `transport` на PMG и переименует исходную группу в Zimbra, добавив суффикс `_old`.
+
+```powershell
+./Contact.ps1 -ImportGroups [-Force]
 ```
 
 ### Поиск контакта
