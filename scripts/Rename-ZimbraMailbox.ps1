@@ -6,6 +6,11 @@ function Rename-ZimbraMailbox([string]$UserEmail,[string]$Alias) {
   $zSess = New-SSHSess -SshHost $ZimbraSshHost -SshUser $ZimbraSshUser -SshPass $ZimbraSshPasswordPlain
   if (-not $zSess) { return @{ Success=$false; Error="SSH к $ZimbraSshHost не установлен" } }
 
+  if ([string]::IsNullOrWhiteSpace($Alias)) {
+    if ($UserEmail -match '^(?<local>[^@]+)@') { $Alias = $matches['local'] }
+    else { return @{ Success=$false; Error="Не удалось определить Alias" } }
+  }
+
   $oldEmail = "{0}_old@{1}" -f $Alias, $Domain
   try {
     $cmd = ("bash -lc 'su - zimbra -c ""zmprov ra {0} {1}""'") -f $UserEmail, $oldEmail
