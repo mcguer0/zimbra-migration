@@ -18,6 +18,9 @@ param(
   [Parameter(ParameterSetName="ImportGroups", Mandatory=$true)]
   [switch]$ImportGroups,
 
+  [Parameter(ParameterSetName="ImportGroups")]
+  [switch]$Force,
+
   [Parameter(ParameterSetName="ExportDistributionGroup", Mandatory=$true)]
   [switch]$ExportDistributionGroup
 )
@@ -25,6 +28,7 @@ param(
 . "$PSScriptRoot/scripts/config.ps1"
 . "$PSScriptRoot/scripts/utils.ps1"
 . "$PSScriptRoot/scripts/Update-PMGTransport.ps1"
+. "$PSScriptRoot/scripts/Rename-ZimbraDistributionList.ps1"
 
 $ListsDir = Join-Path $PSScriptRoot 'lists'
 if (-not (Test-Path $ListsDir)) { New-Item -Path $ListsDir -ItemType Directory -Force | Out-Null }
@@ -33,7 +37,7 @@ if (-not (Test-Path $DlDir)) { New-Item -Path $DlDir -ItemType Directory -Force 
 
 if ($PSCmdlet.ParameterSetName -eq 'Export') {
   Ensure-Module ActiveDirectory
-  if (-not $ContactsSourceOU) { throw "˜˜ ˜˜˜˜˜ ContactsSourceOU ˜ config.ps1" }
+  if (-not $ContactsSourceOU) { throw "ËœËœ ËœËœËœËœËœ ContactsSourceOU Ëœ config.ps1" }
   if (-not $ExportPath) { $ExportPath = 'contacts.csv' }
   if (-not (Split-Path $ExportPath -IsAbsolute)) { $ExportPath = Join-Path $ListsDir $ExportPath }
   Get-ADUser -SearchBase $ContactsSourceOU `
@@ -60,7 +64,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Export') {
         @{n='PostalCode';e={$_.postalCode}},
         @{n='CountryOrRegion';e={ if ($_.co) { $_.co } else { $_.c } }},
         @{n='HiddenFromAddressListsEnabled';e={$false}},
-        @{n='Notes';e={ if ($_.info) { $_.info } else { '˜˜˜˜˜˜˜˜˜˜˜˜ ˜˜ AD' } }} |
+        @{n='Notes';e={ if ($_.info) { $_.info } else { 'ËœËœËœËœËœËœËœËœËœËœËœËœ ËœËœ AD' } }} |
     Export-Csv -Path $ExportPath -NoTypeInformation -Encoding UTF8
 
   Import-Csv $ExportPath | Measure-Object
@@ -69,7 +73,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Export') {
 
 if ($PSCmdlet.ParameterSetName -eq 'Import') {
   Ensure-Module ActiveDirectory
-  if (-not $ContactsTargetOU) { throw "˜˜ ˜˜˜˜˜ ContactsTargetOU ˜ config.ps1" }
+  if (-not $ContactsTargetOU) { throw "ËœËœ ËœËœËœËœËœ ContactsTargetOU Ëœ config.ps1" }
   if (-not $ImportPath) { $ImportPath = 'contacts.csv' }
   if (-not (Split-Path $ImportPath -IsAbsolute)) { $ImportPath = Join-Path $ListsDir $ImportPath }
   if (-not (Test-Path $ImportPath)) { throw "CSV not found: $ImportPath" }
@@ -102,7 +106,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
       if ($email)     { $email = $email.Trim() }
 
       if ([string]::IsNullOrWhiteSpace($email)) {
-          Write-Warning ("SKIP: '{0}' ˜ ˜˜˜˜˜˜ ExternalEmailAddress" -f $name); $skipped++; continue
+          Write-Warning ("SKIP: '{0}' Ëœ ËœËœËœËœËœËœ ExternalEmailAddress" -f $name); $skipped++; continue
       }
 
       $alias = $aliasCsv
@@ -128,7 +132,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
           }
           catch {
               $msg = $_.Exception.Message
-              if ($msg -match 'already exists|˜˜˜ ˜˜˜˜˜˜˜˜˜˜|Object .* already exists') {
+              if ($msg -match 'already exists|ËœËœËœ ËœËœËœËœËœËœËœËœËœËœ|Object .* already exists') {
                   $mc = $null
                   $mc = Get-MailContact -Filter "ExternalEmailAddress -eq '$email'" -ErrorAction SilentlyContinue
                   if (-not $mc) { $mc = Get-MailContact -Filter "PrimarySmtpAddress -eq '$email'" -ErrorAction SilentlyContinue }
@@ -154,10 +158,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
                   }
 
                   if (-not $mc) {
-                      Write-Warning ("CONFLICT: '{0}' <{1}> ˜ ˜˜˜˜˜˜ ˜ ˜˜˜˜˜ ˜˜˜˜˜˜ ˜˜˜˜˜˜˜˜˜˜, ˜˜ ˜˜ ˜˜˜˜˜ ˜˜ ˜˜˜˜˜˜. ˜˜˜˜˜˜˜." -f $name,$email)
+                      Write-Warning ("CONFLICT: '{0}' <{1}> Ëœ ËœËœËœËœËœËœ Ëœ ËœËœËœËœËœ ËœËœËœËœËœËœ ËœËœËœËœËœËœËœËœËœËœ, ËœËœ ËœËœ ËœËœËœËœËœ ËœËœ ËœËœËœËœËœËœ. ËœËœËœËœËœËœËœ." -f $name,$email)
                       $skipped++; continue
                   } else {
-                      Write-Warning ("FOUND-EXISTING: '{0}' ˜˜˜ ˜˜˜˜˜˜˜˜˜˜; ˜˜˜˜˜˜˜˜." -f $name)
+                      Write-Warning ("FOUND-EXISTING: '{0}' ËœËœËœ ËœËœËœËœËœËœËœËœËœËœ; ËœËœËœËœËœËœËœËœ." -f $name)
                   }
               } else {
                   Write-Warning ("ERROR create '{0}' <{1}>: {2}" -f $name,$email,$msg)
@@ -226,9 +230,14 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
-  if (-not $DistributionGroupsOU) { throw "˜˜ ˜˜˜˜˜ DistributionGroupsOU ˜ config.ps1" }
-  if (-not (Test-Path $DlDir)) { throw "Directory not found: $DlDir" }
-  $files = Get-ChildItem -Path $DlDir -Filter '*.csv' -ErrorAction SilentlyContinue
+      if ($Force) {
+        $pmg = Update-PMGTransport -UserEmail $dl
+        if ($pmg.Success) { Write-Host ("PMG transport: {0}" -f $pmg.Line) }
+        else { Write-Warning ("PMTransport error for '{0}': {1}" -f $dl,$pmg.Error) }
+        $rn = Rename-ZimbraDistributionList -ListEmail $dl -Alias $alias
+        if ($rn.Success) { Write-Host ("RENAMED Zimbra: {0} -> {1}" -f $dl,$rn.NewEmail) }
+        else { Write-Warning ("Rename error for '{0}': {1}" -f $dl,$rn.Error) }
+      }
   foreach ($f in $files) {
     $rows = Import-Csv -Path $f.FullName | Where-Object { $_.Member -and $_.Member -notmatch '^#' -and $_.Member -ne 'members' }
     $grouped = $rows | Group-Object DistributionList

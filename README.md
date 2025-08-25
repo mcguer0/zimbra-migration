@@ -249,10 +249,10 @@ su - zimbra -c 'zmprov ga ivan.petrov_old@example.com | egrep "mail|zimbraMailAl
 ```
 
 ### Импорт групп рассылки в Exchange
-CSV из `lists/distribution_list` будут использованы для создания групп в OU `$DistributionGroupsOU`, добавления членов, найденных в Exchange, и создания записи `transport` на PMG для каждой группы.
+CSV из `lists/distribution_list` будут использованы для создания групп в OU `$DistributionGroupsOU` и добавления членов, найденных в Exchange. С ключом `-Force` скрипт также обновит запись `transport` на PMG и переименует исходную группу в Zimbra, добавив суффикс `_old`.
 
 ```powershell
-./Contact.ps1 -ImportGroups
+./Contact.ps1 -ImportGroups [-Force]
 ```
 
 ### Поиск контакта
