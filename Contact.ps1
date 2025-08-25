@@ -230,14 +230,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Import') {
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
-      if ($Force) {
-        $pmg = Update-PMGTransport -UserEmail $dl
-        if ($pmg.Success) { Write-Host ("PMG transport: {0}" -f $pmg.Line) }
-        else { Write-Warning ("PMTransport error for '{0}': {1}" -f $dl,$pmg.Error) }
-        $rn = Rename-ZimbraDistributionList -ListEmail $dl -Alias $alias
-        if ($rn.Success) { Write-Host ("RENAMED Zimbra: {0} -> {1}" -f $dl,$rn.NewEmail) }
-        else { Write-Warning ("Rename error for '{0}': {1}" -f $dl,$rn.Error) }
-      }
+  $files = Get-ChildItem -Path $DlDir -Filter '*.csv' -ErrorAction SilentlyContinue
   foreach ($f in $files) {
     $rows = Import-Csv -Path $f.FullName | Where-Object { $_.Member -and $_.Member -notmatch '^#' -and $_.Member -ne 'members' }
     $grouped = $rows | Group-Object DistributionList
@@ -245,6 +238,11 @@ if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
       $dl = $g.Name
       if (-not $dl) { continue }
       $alias = ($dl -split '@')[0]
+      if ($Force) {
+        $rn = Rename-ZimbraDistributionList -ListEmail $dl -Alias $alias
+        if ($rn.Success) { Write-Host ("RENAMED Zimbra: {0} -> {1}" -f $dl,$rn.NewEmail) }
+        else { Write-Warning ("Rename error for '{0}': {1}" -f $dl,$rn.Error) }
+      }
       $dg = Get-DistributionGroup -Identity $dl -ErrorAction SilentlyContinue
       if (-not $dg) {
         try {
@@ -255,6 +253,7 @@ if ($PSCmdlet.ParameterSetName -eq 'ImportGroups') {
           continue
         }
       }
+      Set-DistributionGroup -Identity $dg.Identity -RequireSenderAuthenticationEnabled:$false -ErrorAction SilentlyContinue | Out-Null
       $pmg = Update-PMGTransport -UserEmail $dl
       if ($pmg.Success) { Write-Host ("PMG transport: {0}" -f $pmg.Line) }
       else { Write-Warning ("PMTransport error for '{0}': {1}" -f $dl,$pmg.Error) }
