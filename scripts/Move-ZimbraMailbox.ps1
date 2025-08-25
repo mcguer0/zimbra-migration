@@ -25,6 +25,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         Write-Host "Добавляю пользователя в группы контакта..."
         foreach ($g in $contactGroups) {
           try {
+            Set-DistributionGroup -Identity $g.Identity -RequireSenderAuthenticationEnabled $false -ErrorAction SilentlyContinue | Out-Null
             $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
             if ($members.PrimarySmtpAddress -notcontains $UserEmail) {
               Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction SilentlyContinue
