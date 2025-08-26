@@ -169,7 +169,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   $bash = @'
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 IMAPSYNC="__IMAPSYNC_PATH__"
 if ! command -v "$IMAPSYNC" >/dev/null 2>&1; then echo "imapsync not found at $IMAPSYNC" >&2; exit 127; fi
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -181,7 +181,7 @@ mkdir -p "$(dirname "$LOGFILE")" || true
 exec > >(tee -a "$LOGFILE") 2>&1
 echo "[imapsync] start for __USER_EMAIL__ at $TS, log: $LOGFILE"
 
-TRIES=5
+TRIES=6
 DELAY=10
 attempt=1
 rc=111
