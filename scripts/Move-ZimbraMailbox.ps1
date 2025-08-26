@@ -6,6 +6,9 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   if ($UserInput -like "*@*") { $UserEmail = $UserInput; $Alias = ($UserInput -split "@")[0] }
   else                        { $Alias = $UserInput; $UserEmail = "$UserInput@$Domain" }
 
+  $AliasTemp = "${Alias}_1"
+  $TempEmail = "$AliasTemp@$Domain"
+
   Write-Host "=== Подготовка ящика в Exchange для $UserEmail ==="
 
   # Проверка контакта и групп
@@ -14,58 +17,11 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     $contact = Get-MailContact -Identity $UserEmail -ErrorAction SilentlyContinue
     if ($contact) {
       Write-Host "Найден контакт $UserEmail. Сохраняю группы..."
-      $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
-      if ($contactGroups) {
+      $contactGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue)
+      if ($contactGroups.Count -gt 0) {
         Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
       } else {
         Write-Host "Контакт не состоит ни в одной группе."
-      }
-
-      if ($Staged) {
-        Write-Host "Добавляю пользователя в группы контакта..."
-        foreach ($g in $contactGroups) {
-          try {
-            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
-            if ($members.PrimarySmtpAddress -notcontains $UserEmail) {
-              Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction SilentlyContinue
-              Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
-            } else {
-              Write-Host "Пользователь уже состоит в группе $($g.PrimarySmtpAddress)"
-            }
-          } catch {
-            Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
-          }
-        }
-        $AliasTemp = "${Alias}_1"
-        $TempEmail = "$AliasTemp@$Domain"
-        Write-Host "Контакт остаётся до финального запуска."
-      } elseif ($Activate) {
-        Write-Host "Удаляю контакт $UserEmail..."
-        Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
-        Write-Host "Контакт удалён. Проверяю членство пользователя..."
-        foreach ($g in $contactGroups) {
-          try {
-            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
-            if ($members.PrimarySmtpAddress -contains $UserEmail) {
-              Write-Host "Пользователь состоит в группе $($g.PrimarySmtpAddress)"
-            } else {
-              Write-Warning "Пользователь отсутствует в группе $($g.PrimarySmtpAddress)"
-            }
-          } catch {
-            Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
-          }
-        }
-        $AliasTemp = "${Alias}_1"
-        $TempEmail = "$AliasTemp@$Domain"
-        try {
-          Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
-          Set-Mailbox $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
-        } catch {
-          Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
-        }
-      } else {
-        Write-Host "Контакт остаётся (не указан -Activate)."
       }
     }
   } catch {
@@ -73,11 +29,19 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   }
 
     # Mailbox: существует?
-  try {
-    $mailboxIdentity = if ($Staged -and $TempEmail) { $TempEmail } else { $UserEmail }
-    $null = Get-Mailbox -Identity $mailboxIdentity -ErrorAction Stop
+  $mailboxIdentity = if ($Staged) { $TempEmail } else { $UserEmail }
+  $mailbox = Get-Mailbox -Identity $mailboxIdentity -ErrorAction SilentlyContinue
+  if (-not $mailbox -and -not $Staged) {
+    $mailbox = Get-Mailbox -Identity $TempEmail -ErrorAction SilentlyContinue
+    if ($mailbox) {
+      $mailboxIdentity = $TempEmail
+      Write-Host "Найден mailbox с временным алиасом."
+    }
+  }
+
+  if ($mailbox) {
     Write-Host "Mailbox уже существует."
-  } catch {
+  } else {
     if ($Activate) {
       Write-Warning "Mailbox $mailboxIdentity не найден."
     } elseif ($Staged -and $contact) {
@@ -99,6 +63,44 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       }
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
       Start-Sleep -Seconds 60
+    }
+    $mailboxIdentity = if ($Staged) { $TempEmail } else { $UserEmail }
+  }
+
+  if ($contact) {
+    if ($contactGroups.Count -gt 0) {
+      Write-Host "Добавляю ящик в группы контакта..."
+      foreach ($g in $contactGroups) {
+        try {
+          $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
+          if ($members.PrimarySmtpAddress -notcontains $mailboxIdentity) {
+            Add-DistributionGroupMember -Identity $g.Identity -Member $mailboxIdentity -ErrorAction SilentlyContinue
+            Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+          } else {
+            Write-Host "Ящик уже состоит в группе $($g.PrimarySmtpAddress)"
+          }
+        } catch {
+          Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+        }
+      }
+    }
+    if ($Staged) { Write-Host "Контакт остаётся до финального запуска." }
+  }
+
+  if ($Activate -and $contact) {
+    Write-Host "Удаляю контакт $UserEmail..."
+    Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
+    Write-Host "Контакт удалён."
+  }
+
+  if ($Activate -and $mailboxIdentity -eq $TempEmail) {
+    try {
+      Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
+      Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
+      Set-Mailbox $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
+      $mailboxIdentity = $UserEmail
+    } catch {
+      Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
     }
   }
 
