@@ -96,7 +96,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   if ($Activate -and $mailboxIdentity -eq $TempEmail) {
     try {
       Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-      Set-Mailbox -Identity $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
+      Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
+      Set-Mailbox $UserEmail -EmailAddresses @{Remove="smtp:$TempEmail"} -ErrorAction Stop
       $mailboxIdentity = $UserEmail
     } catch {
       Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
