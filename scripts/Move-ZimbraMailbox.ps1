@@ -17,8 +17,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     $contact = Get-MailContact -Identity $UserEmail -ErrorAction SilentlyContinue
     if ($contact) {
       Write-Host "Найден контакт $UserEmail. Сохраняю группы..."
-      $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
-      if ($contactGroups) {
+      $contactGroups = @(Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue)
+      if ($contactGroups.Count -gt 0) {
         Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
       } else {
         Write-Host "Контакт не состоит ни в одной группе."
@@ -68,18 +68,20 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   }
 
   if ($contact) {
-    Write-Host "Добавляю ящик в группы контакта..."
-    foreach ($g in $contactGroups) {
-      try {
-        $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
-        if ($members.PrimarySmtpAddress -notcontains $mailboxIdentity) {
-          Add-DistributionGroupMember -Identity $g.Identity -Member $mailboxIdentity -ErrorAction SilentlyContinue
-          Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
-        } else {
-          Write-Host "Ящик уже состоит в группе $($g.PrimarySmtpAddress)"
+    if ($contactGroups.Count -gt 0) {
+      Write-Host "Добавляю ящик в группы контакта..."
+      foreach ($g in $contactGroups) {
+        try {
+          $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
+          if ($members.PrimarySmtpAddress -notcontains $mailboxIdentity) {
+            Add-DistributionGroupMember -Identity $g.Identity -Member $mailboxIdentity -ErrorAction SilentlyContinue
+            Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+          } else {
+            Write-Host "Ящик уже состоит в группе $($g.PrimarySmtpAddress)"
+          }
+        } catch {
+          Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
         }
-      } catch {
-        Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
       }
     }
     if ($Staged) { Write-Host "Контакт остаётся до финального запуска." }
