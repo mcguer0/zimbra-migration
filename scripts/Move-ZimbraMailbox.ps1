@@ -96,8 +96,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
   if ($Activate -and $mailboxIdentity -eq $TempEmail) {
     try {
       Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-      Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
-      Set-Mailbox $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
+      Set-Mailbox -Identity $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
       $mailboxIdentity = $UserEmail
     } catch {
       Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
@@ -169,7 +168,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   $bash = @'
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 IMAPSYNC="__IMAPSYNC_PATH__"
 if ! command -v "$IMAPSYNC" >/dev/null 2>&1; then echo "imapsync not found at $IMAPSYNC" >&2; exit 127; fi
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -181,8 +180,8 @@ mkdir -p "$(dirname "$LOGFILE")" || true
 exec > >(tee -a "$LOGFILE") 2>&1
 echo "[imapsync] start for __USER_EMAIL__ at $TS, log: $LOGFILE"
 
-TRIES=5
-DELAY=15
+TRIES=6
+DELAY=10
 attempt=1
 rc=111
 
@@ -219,7 +218,6 @@ while [ $attempt -le $TRIES ]; do
   if [ $attempt -lt $TRIES ]; then
     echo "[imapsync] will retry after ${DELAY}s ..."
     sleep $DELAY
-    DELAY=$((DELAY*2))
   fi
   attempt=$((attempt+1))
 done
