@@ -92,18 +92,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
     Write-Host "Контакт удалён."
   }
-
-  if ($Activate -and $mailboxIdentity -eq $TempEmail) {
-    try {
-      Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-      Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
-      Set-Mailbox $UserEmail -EmailAddresses @{Remove="smtp:$TempEmail"} -ErrorAction Stop
-      $mailboxIdentity = $UserEmail
-    } catch {
-      Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
-    }
-  }
-
   if ($Staged) {
     try {
       Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
@@ -115,7 +103,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   if ($Activate) {
     try {
-      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-Mailbox -Identity $mailboxIdentity -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Write-Host "Учетная запись активирована."
     } catch {
       Write-Warning ("Не удалось активировать учетную запись {0}: {1}" -f $Alias, $_.Exception.Message)
@@ -193,7 +181,7 @@ while [ $attempt -le $TRIES ]; do
     --user1 "__USER_EMAIL__" \
     --authuser1 "__ADMIN_LOGIN__" --password1 "$ADMIN_PLAIN" \
     --host2 "__EXCHANGE_IMAP_HOST__" --port2 "__EXCHANGE_IMAP_PORT__" __SSL2__ \
-    --user2 "__USER_EMAIL__" \
+    --user2 "__USER2__" \
     --authuser2 "__ADMIN_LOGIN__" --password2 "$ADMIN_PLAIN" \
     --useuid \
     --syncinternaldates \
@@ -230,6 +218,7 @@ exit $rc
     "__REMOTE_LOG__"          = $RemoteLog
     "__ADMIN_IMAP_B64__"      = $AdminImapB64
     "__USER_EMAIL__"          = $UserEmail
+    "__USER2__"               = $mailboxIdentity
     "__ZIMBRA_IMAP_HOST__"    = $ZimbraImapHost
     "__ZIMBRA_IMAP_PORT__"    = "$ZimbraImapPort"
     "__EXCHANGE_IMAP_HOST__"  = $ExchangeImapHost
