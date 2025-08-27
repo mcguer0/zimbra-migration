@@ -92,7 +92,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
     Write-Host "Контакт удалён."
   }
-
   if ($Staged) {
     try {
       Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
@@ -219,8 +218,7 @@ exit $rc
     "__REMOTE_LOG__"          = $RemoteLog
     "__ADMIN_IMAP_B64__"      = $AdminImapB64
     "__USER_EMAIL__"          = $UserEmail
-    # Авторизация на Exchange всегда идёт без временного префикса
-    "__USER2__"               = $UserEmail
+    "__USER2__"               = $mailboxIdentity
     "__ZIMBRA_IMAP_HOST__"    = $ZimbraImapHost
     "__ZIMBRA_IMAP_PORT__"    = "$ZimbraImapPort"
     "__EXCHANGE_IMAP_HOST__"  = $ExchangeImapHost

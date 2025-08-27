@@ -73,8 +73,7 @@ function Invoke-OneUser([string]$UserInput) {
       $TempEmail = "$AliasTemp@$Domain"
       try {
         Write-Host "Переименовываю ящик $TempEmail в $UserEmail..."
-        Set-Mailbox -Identity $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias `
-          -EmailAddresses @{Add="smtp:$UserEmail"; Remove="smtp:$TempEmail"} -ErrorAction Stop
+        Set-Mailbox -Identity $AliasTemp -PrimarySmtpAddress $UserEmail -Alias $Alias -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
         Write-Host "Переименование Exchange-ящика выполнено."
       } catch {
         Write-Warning ("Не удалось переименовать Exchange-ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
