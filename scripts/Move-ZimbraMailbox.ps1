@@ -218,7 +218,10 @@ exit $rc
     "__REMOTE_LOG__"          = $RemoteLog
     "__ADMIN_IMAP_B64__"      = $AdminImapB64
     "__USER_EMAIL__"          = $UserEmail
-    "__USER2__"               = $mailboxIdentity
+    # Для авторизации на Exchange используем тот же логин, что и на Zimbra,
+    # даже если сам почтовый ящик временно создан с суффиксом "_1".
+    # Это позволяет входить по UPN без добавления временного алиаса.
+    "__USER2__"               = $UserEmail
     "__ZIMBRA_IMAP_HOST__"    = $ZimbraImapHost
     "__ZIMBRA_IMAP_PORT__"    = "$ZimbraImapPort"
     "__EXCHANGE_IMAP_HOST__"  = $ExchangeImapHost
