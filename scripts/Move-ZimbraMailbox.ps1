@@ -92,7 +92,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
     Write-Host "Контакт удалён."
   }
-
   if ($Staged) {
     try {
       Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
