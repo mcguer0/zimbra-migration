@@ -15,6 +15,26 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     if ($contact) {
       Write-Host "Найден контакт $UserEmail. Сохраняю группы..."
       $contactGroups = Get-DistributionGroup -ResultSize Unlimited -Filter "Members -eq '$($contact.DistinguishedName)'" -ErrorAction SilentlyContinue
+      # Группы, где контакт разрешён как отправитель (Delivery Management)
+      $contactAllowedGroups = @()
+      try {
+        $allDg = Get-DistributionGroup -ResultSize Unlimited
+        foreach ($dg in $allDg) {
+          $allowedDns = @()
+          if ($dg.AcceptMessagesOnlyFromSendersOrMembers) {
+            foreach ($id in $dg.AcceptMessagesOnlyFromSendersOrMembers) {
+              try { $r = Get-Recipient -Identity $id -ErrorAction Stop } catch { $r = $null }
+              if ($r -and $r.DistinguishedName) { $allowedDns += $r.DistinguishedName }
+            }
+          }
+          if ($allowedDns -and ($allowedDns -contains $contact.DistinguishedName)) { $contactAllowedGroups += $dg }
+        }
+        if ($contactAllowedGroups.Count -gt 0) {
+          Write-Host ("Контакт разрешён отправителем в группах: {0}" -f ($contactAllowedGroups.PrimarySmtpAddress -join ', '))
+        }
+      } catch {
+        Write-Warning ("Не удалось определить Delivery Management группы: {0}" -f $_.Exception.Message)
+      }
       if ($contactGroups) {
         Write-Host ("Контакт состоит в группах: {0}" -f ($contactGroups.PrimarySmtpAddress -join ', '))
       } else {
@@ -22,16 +42,34 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       }
 
       if ($Staged) {
-        Write-Host "Добавляю пользователя в группы контакта..."
+        Write-Host "Добавляю пользователя в группы контакта (по объекту mailbox)..."
+        # Разрешим добавление по объекту самого временного ящика, чтобы не попасть в контакт
+        $rcp = $null
+        try { $rcp = Get-Recipient -Identity "${Alias}_1" -ErrorAction Stop } catch {
+          try { $rcp = Get-Recipient -Identity $Alias -ErrorAction Stop } catch { $rcp = $null }
+        }
         foreach ($g in $contactGroups) {
           try {
             Set-DistributionGroup -Identity $g.Identity -RequireSenderAuthenticationEnabled $false -ErrorAction SilentlyContinue | Out-Null
-            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
-            if ($members.PrimarySmtpAddress -notcontains $UserEmail) {
-              Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction SilentlyContinue
-              Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)"
+            if ($rcp) {
+              $added = $false
+              try {
+                Add-DistributionGroupMember -Identity $g.Identity -Member $rcp.Identity -ErrorAction Stop
+                $added = $true
+              } catch {
+                if ($_.Exception.Message -match 'already a member') {
+                  Write-Host "Уже состоит в группе $($g.PrimarySmtpAddress)"; $added = $true
+                } elseif ($_.Exception.Message -match 'неправильный тип учетной записи|Invalid argument|local group') {
+                  # Fallback: AD-уровень
+                  try { Add-ADGroupMember -Identity $g.DistinguishedName -Members $rcp.DistinguishedName -ErrorAction Stop; $added = $true }
+                  catch { Write-Warning ("[AD] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
+                } else { Write-Warning ("Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
+              }
+              if ($added) { Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)" }
             } else {
-              Write-Host "Пользователь уже состоит в группе $($g.PrimarySmtpAddress)"
+              # если не удалось резолвить получателя — пробуем по адресу как раньше
+              try { Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop; Write-Host "Добавлен (по адресу) в группу $($g.PrimarySmtpAddress)" }
+              catch { Write-Warning ("Не удалось добавить (по адресу) в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
             }
           } catch {
             Write-Warning ("Не удалось добавить в группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
@@ -43,32 +81,102 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       } elseif ($Activate) {
         $AliasTemp = "${Alias}_1"
         $TempEmail = "$AliasTemp@$Domain"
+        $swapOk = $false
         try {
           Write-Host "Подменяю отправителя в Delivery Management (контакт -> mailbox)..."
           Replace-AcceptedSender -OldContactSmtp $UserEmail -NewMailboxId $TempEmail -ErrorAction Stop | Out-Null
+          $swapOk = $true
         } catch {
           Write-Warning ("Ошибка подмены отправителя для групп: {0}" -f $_.Exception.Message)
+        }
+        if (-not $swapOk -and $contactAllowedGroups) {
+          foreach ($dg in $contactAllowedGroups) {
+            try {
+              Set-DistributionGroup -Identity $dg.Identity -AcceptMessagesOnlyFromSendersOrMembers @{ Add = $TempEmail; Remove = $contact.Identity } -ErrorAction Stop
+              Write-Host ("[Fallback] Delivery Management обновлён: {0}" -f $dg.Name)
+            } catch {
+              Write-Warning ("[Fallback] Не удалось обновить Delivery Management для {0}: {1}" -f $dg.Name, $_.Exception.Message)
+            }
+          }
         }
 
         Write-Host "Удаляю контакт $UserEmail..."
         Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
-        Write-Host "Контакт удалён. Проверяю членство пользователя..."
+        Write-Host "Контакт удалён. Обеспечиваю членство пользователя в группах..."
+        # Добавляем сам почтовый ящик по объекту, игнорируя "already a member"
+        $userRcp = $null
+        try { $userRcp = Get-Recipient -Identity $Alias -ErrorAction Stop } catch {
+          try { $userRcp = Get-Recipient -Identity $TempEmail -ErrorAction Stop } catch { $userRcp = $null }
+        }
         foreach ($g in $contactGroups) {
           try {
-            $members = Get-DistributionGroupMember -Identity $g.Identity -ResultSize Unlimited -ErrorAction Stop
-            if ($members.PrimarySmtpAddress -contains $UserEmail) {
-              Write-Host "Пользователь состоит в группе $($g.PrimarySmtpAddress)"
+            if ($userRcp) {
+              $added = $false
+              try {
+                Add-DistributionGroupMember -Identity $g.Identity -Member $userRcp.Identity -ErrorAction Stop
+                $added = $true
+              } catch {
+                if ($_.Exception.Message -match 'already a member') {
+                  Write-Host "Уже состоит в группе $($g.PrimarySmtpAddress)"; $added = $true
+                } elseif ($_.Exception.Message -match 'неправильный тип учетной записи|Invalid argument|local group') {
+                  # Fallback через AD
+                  try { Add-ADGroupMember -Identity $g.DistinguishedName -Members $userRcp.DistinguishedName -ErrorAction Stop; $added = $true }
+                  catch { Write-Warning ("[AD] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
+                } else { Write-Warning ("Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
+              }
+              if ($added) { Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)" }
             } else {
-              Write-Warning "Пользователь отсутствует в группе $($g.PrimarySmtpAddress)"
+              # fallback по адресу
+              try { Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop; Write-Host "Добавлен (по адресу) в группу $($g.PrimarySmtpAddress)" }
+              catch { Write-Warning ("Не удалось добавить (по адресу) в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
             }
           } catch {
-            Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+            Write-Warning ("Не удалось обеспечить членство в группе {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
         try {
           Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
-          Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
-          Set-Mailbox $UserEmail -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction Stop
+          $mbx = $null
+          try { $mbx = Get-Mailbox -Identity $TempEmail -ErrorAction Stop } catch {}
+          $mbxId = if ($mbx) { $mbx.Identity } else { $TempEmail }
+
+          # Сначала приводим Alias и набор адресов (add/remove), затем делаем primary
+          try { Set-Mailbox -Identity $mbxId -Alias $Alias -ErrorAction Stop } catch {}
+          try { Set-Mailbox -Identity $mbxId -EmailAddresses @{Add=$UserEmail; Remove=$TempEmail} -ErrorAction SilentlyContinue } catch {}
+
+          $success = $false
+          $delay = 10
+          for ($i=1; $i -le 6 -and -not $success; $i++) {
+            try {
+              Set-Mailbox -Identity $mbxId -PrimarySmtpAddress $UserEmail -ErrorAction Stop
+              $success = $true
+            } catch {
+              $msg = $_.Exception.Message
+              if ($msg -match 'already.*used|уже используется') {
+                $holder = $null
+                try { $holder = Get-Recipient -Identity $UserEmail -ErrorAction Stop } catch {}
+                if ($holder -and $mbx -and ($holder.DistinguishedName -ne $mbx.DistinguishedName)) {
+                  Write-Warning ("Адрес {0} занят объектом: {1}. Повтор через {2} c..." -f $UserEmail,$holder.Identity,$delay)
+                } else {
+                  Write-Warning ("Адрес {0} ещё не освободился (репликация?). Повтор через {1} c..." -f $UserEmail,$delay)
+                }
+                Start-Sleep -Seconds $delay
+                $delay = [Math]::Min($delay*2, 60)
+              } else {
+                throw
+              }
+            }
+          }
+
+          if ($success) {
+            # после успешного переименования все дальнейшие операции должны идти по новому адресу
+            $mailboxIdentity = $UserEmail
+            # удалить старый адрес _1 как вторичный, если остался
+            try { Set-Mailbox -Identity $UserEmail -EmailAddresses @{ Remove = $TempEmail } -ErrorAction SilentlyContinue } catch {}
+          } else {
+            Write-Warning ("Не удалось назначить PrimarySmtpAddress = {0}. Оставил адрес в списке proxy (smtp:). Продолжаю работать с временным адресом {1}." -f $UserEmail,$TempEmail)
+            $mailboxIdentity = $TempEmail
+          }
         } catch {
           Write-Warning ("Не удалось переименовать временный ящик {0}: {1}" -f $TempEmail, $_.Exception.Message)
         }
@@ -78,6 +186,23 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     }
   } catch {
     Write-Warning ("Не удалось обработать контакт {0}: {1}" -f $UserEmail, $_.Exception.Message)
+  }
+
+  # В режиме Staged гарантированно добавим mailbox в белые списки отправителей
+  if ($Staged -and $contact -and $TempEmail) {
+    $prepOk2 = $false
+    try {
+      Replace-AcceptedSender -OldContactSmtp $UserEmail -NewMailboxId $TempEmail -AddOnly -ErrorAction Stop | Out-Null
+      $prepOk2 = $true
+    } catch {
+      Write-Warning ("Не удалось подготовить Delivery Management (повтор): {0}" -f $_.Exception.Message)
+    }
+    if (-not $prepOk2 -and $contactAllowedGroups) {
+      foreach ($dg in $contactAllowedGroups) {
+        try { Set-DistributionGroup -Identity $dg.Identity -AcceptMessagesOnlyFromSendersOrMembers @{ Add = $TempEmail } -ErrorAction Stop; Write-Host ("[Fallback] Delivery Management подготовлен: {0}" -f $dg.Name) }
+        catch { Write-Warning ("[Fallback] Не удалось подготовить Delivery Management для {0}: {1}" -f $dg.Name, $_.Exception.Message) }
+      }
+    }
   }
 
     # Mailbox: существует?
@@ -128,7 +253,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   if ($Activate) {
     try {
-      Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $false -ErrorAction Stop
+      Set-Mailbox -Identity $mailboxIdentity -HiddenFromAddressListsEnabled $false -ErrorAction Stop
       Write-Host "Учетная запись активирована."
     } catch {
       Write-Warning ("Не удалось активировать учетную запись {0}: {1}" -f $Alias, $_.Exception.Message)

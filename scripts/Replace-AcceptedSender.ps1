@@ -78,7 +78,8 @@ function Replace-AcceptedSender {
         $op = @{ Add = $new.Identity }
         if (-not $AddOnly) { $op['Remove'] = $old.Identity }
 
-        if ($PSCmdlet.ShouldProcess($dg.Identity, ("Update AcceptMessagesOnlyFromSendersOrMembers: {0}" -f ($op.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key,$_.Value } -join '; ')))) {
+        $opsDesc = (($op.GetEnumerator() | ForEach-Object { "{0}={1}" -f $_.Key, $_.Value })) -join '; '
+        if ($PSCmdlet.ShouldProcess($dg.Identity, "Update AcceptMessagesOnlyFromSendersOrMembers: $opsDesc")) {
             try {
                 if ($AddOnly -and $hasNew) {
                     Write-Host ("[SKIP] $($dg.Name): отправитель уже добавлен")
@@ -95,4 +96,3 @@ function Replace-AcceptedSender {
 
     Write-Host ("Готово. Обновлено групп: {0}" -f $done)
 }
-
