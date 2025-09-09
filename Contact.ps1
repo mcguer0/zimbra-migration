@@ -1,3 +1,7 @@
+<#
+DEPRECATED: используйте scripts/Contact-Manager.ps1
+Этот файл оставлен для совместимости и может быть удалён в будущих версиях.
+#>
 [CmdletBinding(DefaultParameterSetName="Export")]
 param(
   [Parameter(ParameterSetName="Export", Mandatory=$true)]

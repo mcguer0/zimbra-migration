@@ -1,281 +1,163 @@
-# Zimbra Migration — набор скриптов для перехода на Exchange
+# Zimbra → Exchange Migration (PowerShell)
 
-Проект содержит сценарии для автоматизации переноса почтовых ящиков и контактов из Zimbra в Microsoft Exchange.
+Набор сценариев для поэтапной миграции почтовых ящиков и контактов из Zimbra в Microsoft Exchange/Active Directory. Включает автоматическое управление членством в рассылках и «разрешёнными отправителями» (Delivery Management), а также интеграцию с Proxmox Mail Gateway.
 
-## Назначение
+## Возможности
 
-Скрипт `Migration-Mailbox.ps1` автоматизирует миграцию ящиков **Zimbra → Exchange** через `imapsync`:
+- Перенос почты через `imapsync` с потоковым логом и повторами.
+- Staged/Activate‑подход:
+  - `-Staged`: создаёт временный mailbox `<alias>_1`, добавляет его в группы контакта и в Delivery Management групп, где контакт был разрешён; контакт остаётся.
+  - `-Force`: финализирует перенос — делает swap (контакт → mailbox) в Delivery Management, удаляет контакт, переименовывает `<alias>_1 → <alias>`, удаляет старый адрес `_1`, активирует ящик в GAL; дополнительно (часть `-Force`) переименовывает Zimbra‑ящик в `<alias>_old@…` и обновляет PMG transport.
+- Синхронизация членства: переносит членство рассылок от контакта к mailbox (есть fallback через Add‑ADGroupMember для проблемных групп).
+- Обслуживание Exchange: включает IMAP, выдаёт FullAccess администратору, приводит UPN к заданному суффиксу.
+- Утилиты: экспорт/импорт контактов, поиск контакта и его групп, ручная замена отправителя в Delivery Management.
 
-- создаёт/включает mailbox в Exchange и **ждёт 60 сек** для репликации;
-- включает IMAP и выдаёт **FullAccess** администратору;
-- переносит почту через `imapsync` (со стороны Zimbra);
-- при запуске с `-Dryrun` выполняет сухой прогон: проверяет наличие mailbox и подключение к серверам;
-- при использовании `-Force` переименовывает старый ящик в Zimbra (`user_old@domain`);
-- при использовании `-Force` создаёт/обновляет `transport` в **PMG**;
-- приводит **UPN (Имя для входа)** к суффиксу `example.com` (или `$UpnSuffix` из конфига);
-- пишет подробные логи на Windows и на сервере Zimbra.
+## Структура
 
----
-
-## Состав
-
-- `Migration-Mailbox.ps1` — основной сценарий.
-- `config.ps1` — настройки (лежит рядом).
-- `users.txt` — список пользователей для пакетного режима (по одному в строке, пустые строки и строки `#комментарий` игнорируются).
+- `Migration-Mailbox.ps1` — точка входа для миграции одного/нескольких пользователей.
+- `scripts/config.example.ps1` — пример конфига; скопируйте в `scripts/config.ps1` и заполните.
+- `scripts/Move-ZimbraMailbox.ps1` — логика подготовки/активации и запуска `imapsync`.
+- `scripts/Replace-AcceptedSender.ps1` — замена контакта на mailbox во всех группах, где контакт разрешён отправителем.
+- `scripts/Update-PMGTransport.ps1` — обновление `transport` в Proxmox Mail Gateway.
+- `scripts/Rename-ZimbraMailbox.ps1` — переименование Zimbra‑ящика в `<alias>_old@…`.
+- `scripts/Find-Contact.ps1` — поиск контакта и его групп в Exchange/AD.
 - `scripts/Contact-Manager.ps1` — экспорт/импорт контактов.
-- `scripts/Find-Contact.ps1` — поиск контакта и его групп в Exchange.
+- `lists/` — рабочие CSV для контактов и рассылок.
 
-Пример `users.txt`:
-
-```
-# список к миграции
-ivan.petrov
-maria.ivanova@example.com
-```
-
----
+Примечание: файл `Contact.ps1` в корне помечен как устаревший и сохранён для совместимости; используйте `scripts/Contact-Manager.ps1`.
 
 ## Требования
 
-- Windows PowerShell 5.1 (рекомендовано запускать на сервере Exchange или админ-станции в домене).
-- Доступны cmdlets Exchange (локально или через ремоут на `$ExchangeMgmtHost`).
-- Модули:  
-  - `Posh-SSH` (для SSH на Zimbra/PMG),  
-  - `ActiveDirectory` (для смены UPN).
-- На сервере Zimbra установлен `imapsync` и доступ по SSH.
-- Доступ по SSH к PMG (если используете обновление `transport`).
-- Учётка, запускающая скрипт, имеет права:
-  - в Exchange (Enable-Mailbox, Set-CASMailbox, Add-MailboxPermission),
-  - в AD (изменение `userPrincipalName`),
-  - SSH к Zimbra/PMG.
+- Windows PowerShell 5.1.
+- Командлеты Exchange локально либо через ремоут на `$ExchangeMgmtHost`.
+- Модули: `Posh-SSH`, `ActiveDirectory`.
+- На Zimbra установлен `imapsync` и доступ по SSH; доступ по SSH к PMG (если используете transport).
+- Учетная запись запуска имеет права в Exchange/AD и SSH.
 
-Установка недостающих модулей (при необходимости):
+Установка модулей:
 
 ```powershell
 Install-Module Posh-SSH -Scope AllUsers -Force
-# Модуль ActiveDirectory ставится через RSAT / роли AD DS Tools
+# Модуль ActiveDirectory — через RSAT / AD DS Tools
 ```
 
----
+## Настройка
 
-## Настройка `config.ps1`
-
-Откройте и заполните ключевые поля:
+1) Скопируйте и отредактируйте конфиг:
 
 ```powershell
-$Domain                 = "example.com"
-# OU для экспорта/импорта контактов и создания групп рассылки
-$ContactsSourceOU       = ""
-$ContactsTargetOU       = ""
-$DistributionGroupsOU   = ""
-
-$AdminLogin             = "EXCH\imapadmin"        # учётка, получающая FullAccess и IMAP proxy-auth
-
-$ExchangeImapHost       = "mail01.example.com"
-$ZimbraImapHost         = "zimbra.example.com"
-
-$AdminImapPasswordPlain = "SuperSecret"
-
-$ZimbraSshHost          = "zimbra.example.com"
-$ZimbraSshUser          = "root"
-$ZimbraSshPasswordPlain = "RootPass"
-$ImapSyncPath           = "/usr/bin/imapsync"
-
-$PMGHost                = "pmg.example.com"
-$PMGUser                = "root"
-$PMGPasswordPlain       = "RootPass"
-
-$LocalLogDir            = ".\ImapSyncLogs"
-$ExchangeMgmtHost       = "localhost"
-
-# Важно для «Имя для входа» (UPN):
-$UpnSuffix              = "example.com"
+Copy-Item .\scripts\config.example.ps1 .\scripts\config.ps1
+# затем заполните scripts/config.ps1
 ```
 
-> Пароли хранятся в открытом виде. Ограничьте доступ к файлам NTFS-правами. При желании можно позже перевести на хранилище учётных данных.
-
----
-
-## Как это работает (поток для каждого пользователя)
-
-1. Нормализует адрес: `user` → `user@$Domain`.
-2. Ищет контакт с таким адресом в Exchange. При запуске с `-Staged` пользователь добавляется в группы контакта, контакт остаётся, а рабочий ящик ещё не создаётся. Дополнительно скрипт добавляет новый mailbox в «управление доставкой» (Delivery Management) всех групп, где контакт был разрешён как отправитель, чтобы подготовить белые списки. При финальном запуске с `-Activate` (обычно вместе с `-Force`) выполняется «swap»: контакт удаляется из белых списков, а mailbox остаётся разрешённым отправителем.
-3. Проверяет mailbox в Exchange. При подготовке (`-Staged`) создаётся временный ящик `<alias>_1` с адресом `<alias>_1@$Domain`, он отключается и скрывается из адресных списков. При последующем запуске с `-Activate` этот временный ящик переименовывается в боевой `<alias>@$Domain`. Если mailbox отсутствует, выполняется **Enable-Mailbox** и пауза 60 сек.
-4. Приводит UPN к `$UpnSuffix` (например, `mailtest@example.com`).
-5. Включает IMAP: `Set-CASMailbox -ImapEnabled $true`.
-6. Выдаёт FullAccess администратору `$AdminLogin`.
-7. На Zimbra по SSH готовит и запускает **imapsync** с повторами и логированием (stream в файл в `$LocalLogDir`).
-8. Если перенос **успешен**:
-   - при запуске с `-Force` переименовывает старый ящик в `user_old@domain` (при конфликте добавит таймштамп);
-   - при запуске с `-Force` создаёт/обновляет запись `transport` в PMG (`user@domain smtp:[ExchangeHost]:25`);
-   - без `-Force` эти шаги пропускаются.
-9. Убирает временные файлы на Zimbra, закрывает SSH.
-10. Пишет итог в консоль и путь к локальному логу.
-
----
-
-## Запуск
-
-По умолчанию выполняется перенос почты. Для подготовки ящика без удаления контакта и активации используйте `-Staged`. Для сухого прогона без переноса используйте `-Dryrun`. Чтобы автоматически переименовать Zimbra-аккаунт и настроить transport на PMG, добавьте ключ `-Force`.
-
-### Один пользователь
+Ключевые параметры `scripts/config.ps1`:
 
 ```powershell
-.\Migration-Mailbox.ps1 -User ivan.petrov
-# или явный адрес
-.\Migration-Mailbox.ps1 -User ivan.petrov@example.com
+$Domain               = 'example.com'
+$ContactsSourceOU     = ''
+$ContactsTargetOU     = ''
+$DistributionGroupsOU = ''
+$AdminLogin           = 'EXCH\\migration'
+$ExchangeImapHost     = 'mail01.example.com'
+$ZimbraImapHost       = 'zimbra.example.com'
+$AdminImapPasswordPlain = 'secret'
+$ZimbraSshHost        = 'zimbra.example.com'
+$ZimbraSshUser        = 'root'
+$ZimbraSshPasswordPlain = 'rootpass'
+$ImapSyncPath         = '/usr/bin/imapsync'
+$PMGHost              = 'pmg.example.com'
+$PMGUser              = 'root'
+$PMGPasswordPlain     = 'rootpass'
+$LocalLogDir          = .\ImapSyncLogs
+$ExchangeMgmtHost     = 'localhost'
+$UpnSuffix            = 'example.com'
 ```
 
-### Пакетный режим
+Пароли лежат открыто — ограничьте доступ к репозиторию ACL.
 
-```powershell
-.\Migration-Mailbox.ps1 -Path .\users.txt
-```
+## Сценарии запуска
 
-### С переименованием и транспортом
-
-```powershell
-.\Migration-Mailbox.ps1 -User ivan.petrov -Force
-# либо
-.\Migration-Mailbox.ps1 -Path .\users.txt -Force
-```
-
-### Предварительная подготовка (staged)
-
-```powershell
-.\Migration-Mailbox.ps1 -User ivan.petrov -Staged
-# либо пакетно
-.\Migration-Mailbox.ps1 -Path .\users.txt -Staged
-```
-
-Такой запуск создаёт временный mailbox `<alias>_1` (отключённый и скрытый из адресных списков) и переносит пользователя в группы контакта, оставляя сам контакт. Позже выполните миграцию повторно с `-Activate` (и при необходимости с `-Force`), чтобы удалить контакт и переименовать временный ящик в боевой.
-
-При этом в режиме `-Staged` заранее выполняется добавление нового mailbox в «разрешённых отправителях» групп (Delivery Management), где контакт был разрешён. В режиме `-Activate` выполняется замена: контакт удаляется из этих белых списков, чтобы пользователь мог писать в рассылки сразу после удаления контакта.
-
-### Ручная подмена отправителя в группах (при необходимости)
-
-В репо есть функция `scripts/Replace-AcceptedSender.ps1`, выполняющая точечную замену контакта на mailbox во всех группах, где контакт был разрешён отправителем:
-
-```powershell
-# Добавить mailbox, не удаляя контакт (подготовка):
-Replace-AcceptedSender -OldContactSmtp user@domain.ru -NewMailboxId user@domain.ru -AddOnly
-
-# Полная замена (перед удалением контакта):
-Replace-AcceptedSender -OldContactSmtp user@domain.ru -NewMailboxId user@domain.ru
-```
-
-Параметр `-NewMailboxId` принимает любой валидный идентификатор почтового ящика: UPN/SMTP/Alias/DN. Для много‑значных свойств используется поддерживаемый синтаксис `@{Add=...;Remove=...}`.
-
-### Сухой прогон
+- Сухой прогон (без переноса):
 
 ```powershell
 .\Migration-Mailbox.ps1 -User ivan.petrov -Dryrun
 ```
 
-Без переноса почты будут выведены сведения о наличии mailbox и доступности серверов.
-
----
-
-## Где смотреть логи
-
-- Windows (подробный stream-лог `imapsync`): `C:\ImapSyncLogs\imapsync-<user>-<timestamp>.log`
-- На Zimbra (временный): `/tmp/imapsync-<user>-<timestamp>.log` — удаляется в конце работы.
-
----
-
-## Проверка результата
-
-В Exchange:
+- Подготовка (Staged): создаёт `<alias>_1`, добавляет в группы и Delivery Management, переносит почту, не удаляя контакт:
 
 ```powershell
-Get-Mailbox -Identity ivan.petrov@example.com
-Get-CASMailbox -Identity ivan.petrov@example.com | fl ImapEnabled
-Get-MailboxPermission -Identity ivan.petrov@example.com | ? {$_.User -match 'imapadmin'}
+.\Migration-Mailbox.ps1 -User ivan.petrov -Staged
 ```
 
-В AD (UPN):
+- Финализация (Force): swap в Delivery Management, удаление контакта, переименование `<alias>_1 → <alias>`, удаление адреса `_1`, активация, дельта‑перенос, PMG и переименование Zimbra:
 
 ```powershell
-Get-ADUser -LDAPFilter "(sAMAccountName=ivan.petrov)" -Properties userPrincipalName | fl userPrincipalName
+.\Migration-Mailbox.ps1 -User ivan.petrov -Force
 ```
 
-В PMG (по SSH):
-
-```bash
-grep "^ivan.petrov@example.com" /etc/pmg/transport
-postmap -q "ivan.petrov@example.com" /etc/pmg/transport
-```
-
-В Zimbra (по SSH):
-
-```bash
-su - zimbra -c 'zmprov ga ivan.petrov_old@example.com | egrep "mail|zimbraMailAlias"'
-```
-
----
-
-## Типичные проблемы и решения
-
-- **Нет Exchange cmdlets** → запускайте на сервере Exchange или задайте `$ExchangeMgmtHost` и проверьте Kerberos/WinRM.
-- **`Posh-SSH`/`ActiveDirectory` не найдены** → установите модуль/RSAT и перезапустите консоль админа.
-- **SSH недоступен** → проверьте хост/порт/пароль/файрвол на Zimbra и PMG.
-- **`imapsync` не найден** → установите на Zimbra и задайте корректный `$ImapSyncPath`.
-- **Нет прав на смену UPN** → дайте учётке право изменять атрибуты пользователей в AD.
-
----
-
-## Замечания по безопасности
-
-- Держите `config.ps1` в защищённой папке (ограничьте ACL).
-- Логи могут содержать адреса и структуру ящиков — не передавайте их третьим лицам.
-
----
-
-## Быстрый чек-лист перед запуском
-
-- [ ] Заполнен `config.ps1` (особенно `$Domain`, `$UpnSuffix`, `$ExchangeImapHost`, `$ZimbraImapHost`, пароли).
-- [ ] На Zimbra есть `imapsync` и доступ по SSH.
-- [ ] На PMG есть доступ по SSH (если используете transport).
-- [ ] На Windows есть `Posh-SSH` и `ActiveDirectory`.
-- [ ] Есть права в Exchange/AD.
-
----
-
-## Работа с контактами
-
-### Экспорт и импорт
-Скрипт `Contact.ps1` может экспортировать контакты из Active Directory в CSV и импортировать их в Exchange. Все CSV сохраняются в папку `lists` в корне репозитория. По умолчанию используется файл `contacts.csv`.
+- Пакетно:
 
 ```powershell
-# Экспорт из AD в lists/contacts.csv
-./Contact.ps1 -Export
-
-# Импорт в OU из lists/contacts.csv
-./Contact.ps1 -Import
-
-# Импорт только одного контакта
-./Contact.ps1 -Import -Contact ivan.petrov@example.com
+.\Migration-Mailbox.ps1 -Path .\users.txt -Staged
+.\Migration-Mailbox.ps1 -Path .\users.txt -Force
 ```
 
-### Экспорт групп рассылки из Zimbra
-Группы сохраняются в `lists/distribution_list`.
+`users.txt` — `user` или `user@example.com` построчно; строки `#` игнорируются.
+
+## Что делает миграция (по порядку)
+
+1. Нормализует пользователя в SMTP и ищет контакт.
+2. Сохраняет: группы, где контакт — член; и группы, где контакт разрешён отправителем (Delivery Management).
+3. `-Staged`:
+   - включает временный mailbox `<alias>_1` и скрывает его из адресных списков;
+   - добавляет `<alias>_1` в членство групп контакта и в Delivery Management (без удаления контакта);
+   - приводит UPN к `$UpnSuffix`, включает IMAP, выдаёт FullAccess; запускает `imapsync`.
+4. `-Force`:
+   - меняет отправителя в Delivery Management (контакт → mailbox) с fallback‑логикой, удаляет контакт;
+   - гарантирует членство mailbox во всех группах контакта (fallback через Add‑ADGroupMember);
+   - переименовывает `<alias>_1 → <alias>` с ожиданием репликации и удаляет прокси‑адрес `_1`;
+   - активирует ящик в GAL, приводит UPN, включает IMAP, выдаёт FullAccess; запускает дельта‑перенос; обновляет PMG и переименовывает Zimbra‑ящик.
+
+## Утилиты
+
+- Замена отправителя в Delivery Management:
 
 ```powershell
-./Contact.ps1 -ExportDistributionGroup
+# Подготовка: добавить mailbox, не удаляя контакт
+scripts/Replace-AcceptedSender.ps1
+Replace-AcceptedSender -OldContactSmtp user@domain -NewMailboxId user@domain -AddOnly
+
+# Swap: заменить контакт на mailbox
+Replace-AcceptedSender -OldContactSmtp user@domain -NewMailboxId user@domain
 ```
 
-### Импорт групп рассылки в Exchange
-CSV из `lists/distribution_list` будут использованы для создания групп в OU `$DistributionGroupsOU` и добавления членов, найденных в Exchange. С ключом `-Force` скрипт также обновит запись `transport` на PMG и переименует исходную группу в Zimbra, добавив суффикс `_old`.
+- Поиск контакта и его групп: `scripts/Find-Contact.ps1 -User user`
+- Экспорт/импорт контактов: `scripts/Contact-Manager.ps1` (CSV лежат в `lists/`).
+
+## Логи и проверка
+
+- Локальный лог: `ImapSyncLogs\imapsync-<user>-<timestamp>.log`
+- На Zimbra: `/tmp/imapsync-<user>-<timestamp>.log` (удаляется в конце).
+
+Проверка:
 
 ```powershell
-./Contact.ps1 -ImportGroups [-Force]
+Get-Mailbox ivan.petrov | fl PrimarySmtpAddress,Alias,EmailAddresses
+Get-CASMailbox ivan.petrov | fl ImapEnabled
+Get-MailboxPermission ivan.petrov | ? { $_.User -match 'migration' }
 ```
 
-### Поиск контакта
-Для быстрого поиска контакта и его групп используйте `scripts/Find-Contact.ps1`:
+## Рекомендации по Delivery Management
 
-```powershell
-./scripts/Find-Contact.ps1 -User ivan.petrov@example.com
-```
+- Держите список «кто может писать» в базовой группе (например, `all_users`) и добавляйте её в DM нужных рассылок.
+- Динамические группы не принимают статическое членство — предупреждения в логах в этом случае ожидаемы.
 
-Скрипт выводит адрес контакта и список рассылок, в которых он состоит.
+## Ограничения
+
+- Репликация AD/Exchange может занимать минуты; сценарий делает повторы, но отдельные свойства применяются не мгновенно.
+- Если контакт удалён до `-Force` без предварительного экспорта, восстановить его включения в DM невозможно штатно.
+
+## Вклад
+
+Скрипты предоставляются «как есть». PR/issue приветствуются.
+

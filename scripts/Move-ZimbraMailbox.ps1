@@ -50,7 +50,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         }
         foreach ($g in $contactGroups) {
           try {
-            Set-DistributionGroup -Identity $g.Identity -RequireSenderAuthenticationEnabled $false -ErrorAction SilentlyContinue | Out-Null
+            Set-DistributionGroup -Identity $g.Identity -RequireSenderAuthenticationEnabled $false -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Out-Null
             if ($rcp) {
               $added = $false
               try {
@@ -62,7 +62,11 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
                 } elseif ($_.Exception.Message -match 'неправильный тип учетной записи|Invalid argument|local group') {
                   # Fallback: AD-уровень
                   try { Add-ADGroupMember -Identity $g.DistinguishedName -Members $rcp.DistinguishedName -ErrorAction Stop; $added = $true }
-                  catch { Write-Warning ("[AD] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
+                  catch {
+                    $m = $_.Exception.Message
+                    if ($m -match 'already.*member|уже.*(состоит|присутствует)') { $added = $true }
+                    else { Write-Warning ("[AD] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $m) }
+                  }
                 } else { Write-Warning ("Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
               }
               if ($added) { Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)" }
@@ -100,9 +104,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
           }
         }
 
-        Write-Host "Удаляю контакт $UserEmail..."
-        Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
-        Write-Host "Контакт удалён. Обеспечиваю членство пользователя в группах..."
+        Write-Host "Обеспечиваю членство пользователя в группах (перед удалением контакта)..."
         # Добавляем сам почтовый ящик по объекту, игнорируя "already a member"
         $userRcp = $null
         try { $userRcp = Get-Recipient -Identity $Alias -ErrorAction Stop } catch {
@@ -110,6 +112,8 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         }
         foreach ($g in $contactGroups) {
           try {
+            # Снимем требование аутентификации отправителя, чтобы не мешало добавлению
+            try { Set-DistributionGroup -Identity $g.Identity -RequireSenderAuthenticationEnabled $false -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Out-Null } catch {}
             if ($userRcp) {
               $added = $false
               try {
@@ -121,8 +125,18 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
                 } elseif ($_.Exception.Message -match 'неправильный тип учетной записи|Invalid argument|local group') {
                   # Fallback через AD
                   try { Add-ADGroupMember -Identity $g.DistinguishedName -Members $userRcp.DistinguishedName -ErrorAction Stop; $added = $true }
-                  catch { Write-Warning ("[AD] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
-                } else { Write-Warning ("Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message) }
+                  catch {
+                    $m = $_.Exception.Message
+                    if ($m -match 'already.*member|уже.*(состоит|присутствует)') { $added = $true }
+                    else {
+                      # Последняя попытка — добавить по SMTP/алиасу через Exchange cmdlet
+                      try { Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop; $added = $true }
+                      catch { Write-Warning ("[AD] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $m) }
+                    }
+                  }
+                } else {
+                  Write-Warning ("Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+                }
               }
               if ($added) { Write-Host "Добавлен в группу $($g.PrimarySmtpAddress)" }
             } else {
@@ -134,6 +148,10 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
             Write-Warning ("Не удалось обеспечить членство в группе {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
+
+        Write-Host "Удаляю контакт $UserEmail..."
+        Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
+        Write-Host "Контакт удалён."
         try {
           Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
           $mbx = $null
@@ -173,6 +191,22 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
             $mailboxIdentity = $UserEmail
             # удалить старый адрес _1 как вторичный, если остался
             try { Set-Mailbox -Identity $UserEmail -EmailAddresses @{ Remove = $TempEmail } -ErrorAction SilentlyContinue } catch {}
+            Write-Host "Пауза 30 сек для репликации адресов/политик..."
+            Start-Sleep -Seconds 30
+            # Финальная проверка членства после переименования
+            if ($contactGroups -and $contactGroups.Count -gt 0) {
+              foreach ($g in $contactGroups) {
+                try {
+                  try { Set-DistributionGroup -Identity $g.Identity -RequireSenderAuthenticationEnabled $false -ErrorAction SilentlyContinue -WarningAction SilentlyContinue | Out-Null } catch {}
+                  Add-DistributionGroupMember -Identity $g.Identity -Member $UserEmail -ErrorAction Stop
+                  Write-Host ("[Final] Добавлен в группу {0}" -f $g.PrimarySmtpAddress)
+                } catch {
+                  if ($_.Exception.Message -notmatch 'already a member') {
+                    Write-Warning ("[Final] Не удалось добавить в {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
+                  }
+                }
+              }
+            }
           } else {
             Write-Warning ("Не удалось назначить PrimarySmtpAddress = {0}. Оставил адрес в списке proxy (smtp:). Продолжаю работать с временным адресом {1}." -f $UserEmail,$TempEmail)
             $mailboxIdentity = $TempEmail
@@ -188,22 +222,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     Write-Warning ("Не удалось обработать контакт {0}: {1}" -f $UserEmail, $_.Exception.Message)
   }
 
-  # В режиме Staged гарантированно добавим mailbox в белые списки отправителей
-  if ($Staged -and $contact -and $TempEmail) {
-    $prepOk2 = $false
-    try {
-      Replace-AcceptedSender -OldContactSmtp $UserEmail -NewMailboxId $TempEmail -AddOnly -ErrorAction Stop | Out-Null
-      $prepOk2 = $true
-    } catch {
-      Write-Warning ("Не удалось подготовить Delivery Management (повтор): {0}" -f $_.Exception.Message)
-    }
-    if (-not $prepOk2 -and $contactAllowedGroups) {
-      foreach ($dg in $contactAllowedGroups) {
-        try { Set-DistributionGroup -Identity $dg.Identity -AcceptMessagesOnlyFromSendersOrMembers @{ Add = $TempEmail } -ErrorAction Stop; Write-Host ("[Fallback] Delivery Management подготовлен: {0}" -f $dg.Name) }
-        catch { Write-Warning ("[Fallback] Не удалось подготовить Delivery Management для {0}: {1}" -f $dg.Name, $_.Exception.Message) }
-      }
-    }
-  }
+  # Раннюю попытку подготовки Delivery Management убрали — выполняется строго после Enable-Mailbox
 
     # Mailbox: существует?
   try {
@@ -216,14 +235,14 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     } elseif ($Staged -and $contact) {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
+      Write-Host "Mailbox включён. Пауза 30 сек для репликации..."
+      Start-Sleep -Seconds 30
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
       try {
         Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
       } catch {
         Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
       }
-      Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
-      Start-Sleep -Seconds 60
       # Добавляем mailbox в белые списки отправителей для групп, где контакт был разрешён
       try {
         Write-Host "Добавляю mailbox в Delivery Management групп (без удаления контакта)..."
@@ -234,11 +253,11 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
     } else {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
+      Write-Host "Mailbox включён. Пауза 30 сек для репликации..."
+      Start-Sleep -Seconds 30
       if ($Staged) {
         Set-Mailbox -Identity $UserEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
       }
-      Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
-      Start-Sleep -Seconds 60
     }
   }
 
@@ -307,7 +326,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   $bash = @'
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
 IMAPSYNC="__IMAPSYNC_PATH__"
 if ! command -v "$IMAPSYNC" >/dev/null 2>&1; then echo "imapsync not found at $IMAPSYNC" >&2; exit 127; fi
 TS="$(date +%Y%m%d-%H%M%S)"
@@ -320,7 +339,7 @@ exec > >(tee -a "$LOGFILE") 2>&1
 echo "[imapsync] start for __USER_EMAIL__ at $TS, log: $LOGFILE"
 
 TRIES=5
-DELAY=15
+DELAY=5
 attempt=1
 rc=111
 
@@ -348,18 +367,23 @@ while [ $attempt -le $TRIES ]; do
     --usecache \
     --useheader 'Message-Id' \
     --delete2duplicates \
-    --timeout 600 \
+    --timeout1 45 --timeout2 45 \
     --logfile "$LOGFILE"
 
   rc=$?
   echo "[imapsync] exit code: $rc"
   if [ $rc -eq 0 ]; then break; fi
-  if [ $attempt -lt $TRIES ]; then
-    echo "[imapsync] will retry after ${DELAY}s ..."
-    sleep $DELAY
-    DELAY=$((DELAY*2))
+  # Retry only on Exchange (host2) authentication failure
+  if grep -q 'Host2 failure: Error login on' "$LOGFILE"; then
+    if [ $attempt -lt $TRIES ]; then
+      echo "[imapsync] host2 auth failed, retry after ${DELAY}s ..."
+      sleep $DELAY
+      attempt=$((attempt+1))
+      continue
+    fi
   fi
-  attempt=$((attempt+1))
+  # Not an auth failure or retries exhausted
+  break
 done
 exit $rc
 '@
