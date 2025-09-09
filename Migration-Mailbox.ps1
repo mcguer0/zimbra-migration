@@ -25,6 +25,7 @@ param(
 . "$PSScriptRoot\scripts\DryRun-ZimbraMailbox.ps1"
 . "$PSScriptRoot\scripts\Rename-ZimbraMailbox.ps1"
 . "$PSScriptRoot\scripts\Update-PMGTransport.ps1"
+. "$PSScriptRoot\scripts\Replace-AcceptedSender.ps1"
 
 # == Локальные функции, специфичные для "основного" скрипта ==
 

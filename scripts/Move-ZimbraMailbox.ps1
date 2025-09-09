@@ -41,6 +41,15 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
         $TempEmail = "$AliasTemp@$Domain"
         Write-Host "Контакт остаётся до финального запуска."
       } elseif ($Activate) {
+        $AliasTemp = "${Alias}_1"
+        $TempEmail = "$AliasTemp@$Domain"
+        try {
+          Write-Host "Подменяю отправителя в Delivery Management (контакт -> mailbox)..."
+          Replace-AcceptedSender -OldContactSmtp $UserEmail -NewMailboxId $TempEmail -ErrorAction Stop | Out-Null
+        } catch {
+          Write-Warning ("Ошибка подмены отправителя для групп: {0}" -f $_.Exception.Message)
+        }
+
         Write-Host "Удаляю контакт $UserEmail..."
         Remove-MailContact -Identity $contact.Identity -Confirm:$false -ErrorAction Stop
         Write-Host "Контакт удалён. Проверяю членство пользователя..."
@@ -56,8 +65,6 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
             Write-Warning ("Не удалось проверить группу {0}: {1}" -f $g.PrimarySmtpAddress, $_.Exception.Message)
           }
         }
-        $AliasTemp = "${Alias}_1"
-        $TempEmail = "$AliasTemp@$Domain"
         try {
           Write-Host "Переименовываю временный ящик $TempEmail в $UserEmail..."
           Set-Mailbox $TempEmail -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop
@@ -92,6 +99,13 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       }
       Write-Host "Mailbox включён. Пауза 60 сек для репликации..."
       Start-Sleep -Seconds 60
+      # Добавляем mailbox в белые списки отправителей для групп, где контакт был разрешён
+      try {
+        Write-Host "Добавляю mailbox в Delivery Management групп (без удаления контакта)..."
+        Replace-AcceptedSender -OldContactSmtp $UserEmail -NewMailboxId $TempEmail -AddOnly -ErrorAction Stop | Out-Null
+      } catch {
+        Write-Warning ("Не удалось обновить Delivery Management для {0}: {1}" -f $UserEmail, $_.Exception.Message)
+      }
     } else {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
       Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
