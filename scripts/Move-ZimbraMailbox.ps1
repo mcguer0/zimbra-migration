@@ -423,6 +423,7 @@ exit $rc
     $stream.WriteLine($startCmd)
 
     $writer = New-Object System.IO.StreamWriter($LocalLog, $false, [Text.Encoding]::UTF8)
+    $lineBuf = ""
     try {
       $exitCode = $null
       while ($true) {
@@ -431,6 +432,19 @@ exit $rc
           if ($chunk) {
             Write-Host -NoNewline $chunk
             $writer.Write($chunk); $writer.Flush()
+            # Try to parse full lines from chunk to detect imapsync total/progress
+            $lineBuf += $chunk
+            while ($lineBuf -match "^(.*?)(?:`r?`n)") {
+              $line  = $matches[1]
+              $lineBuf = $lineBuf.Substring($matches[0].Length)
+              try {
+                if ($line -match 'Progression\s*:\s*(\d+)\s*/\s*(\d+)') {
+                  Write-Host ("__IMAPSYNC_PROGRESS__:{0}/{1}" -f $matches[1], $matches[2])
+                } elseif ($line -match '(?i)(?:messages\s+copied|copied)\s*:?\s*(\d+)\s*/\s*(\d+)') {
+                  Write-Host ("__IMAPSYNC_PROGRESS__:{0}/{1}" -f $matches[1], $matches[2])
+                }
+              } catch {}
+            }
             if ($chunk -match "__END__:(\d+)") { $exitCode = [int]$matches[1]; break }
             elseif ($chunk -match "__END__:(True|False)") {
             if ($matches[1] -eq "True") {
