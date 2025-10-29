@@ -1,10 +1,11 @@
 ﻿# Требует: config.ps1, utils.ps1
 # Экспортирует: Invoke-MoveZimbraMailbox
 
-function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$Activate) {
+function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$Activate, [string]$AdSamAccount) {
   # Нормализация user/email
   if ($UserInput -like "*@*") { $UserEmail = $UserInput; $Alias = ($UserInput -split "@")[0] }
   else                        { $Alias = $UserInput; $UserEmail = "$UserInput@$Domain" }
+  $AdIdentity = if ($AdSamAccount -and -not [string]::IsNullOrWhiteSpace($AdSamAccount)) { $AdSamAccount } else { $Alias }
 
   Write-Host "=== Подготовка ящика в Exchange для $UserEmail ==="
 
@@ -234,12 +235,12 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       Write-Warning "Mailbox $mailboxIdentity не найден."
     } elseif ($Staged -and $contact) {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias' с временным алиасом '$AliasTemp'..."
-      Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
+      Enable-Mailbox -Identity $AdIdentity -PrimarySmtpAddress $TempEmail -Alias $AliasTemp -ErrorAction Stop | Out-Null
       Write-Host "Mailbox включён. Пауза 30 сек для репликации..."
       Start-Sleep -Seconds 30
       Set-Mailbox -Identity $TempEmail -HiddenFromAddressListsEnabled $true -ErrorAction Stop
       try {
-        Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
+        Set-ADUser -Identity $AdIdentity -EmailAddress $UserEmail -ErrorAction Stop
       } catch {
         Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
       }
@@ -252,7 +253,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
       }
     } else {
       Write-Host "Mailbox не найден. Enable-Mailbox для '$Alias'..."
-      Enable-Mailbox -Identity $Alias -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
+      Enable-Mailbox -Identity $AdIdentity -PrimarySmtpAddress $UserEmail -Alias $Alias -ErrorAction Stop | Out-Null
       Write-Host "Mailbox включён. Пауза 30 сек для репликации..."
       Start-Sleep -Seconds 30
       if ($Staged) {
@@ -263,7 +264,7 @@ function Invoke-MoveZimbraMailbox([string]$UserInput, [switch]$Staged, [switch]$
 
   if ($Staged) {
     try {
-      Set-ADUser -Identity $Alias -EmailAddress $UserEmail -ErrorAction Stop
+      Set-ADUser -Identity $AdIdentity -EmailAddress $UserEmail -ErrorAction Stop
       Write-Host "Поле mail обновлено: $UserEmail"
     } catch {
       Write-Warning ("Не удалось обновить поле mail для {0}: {1}" -f $Alias, $_.Exception.Message)
@@ -350,7 +351,7 @@ while [ $attempt -le $TRIES ]; do
     --user1 "__USER_EMAIL__" \
     --authuser1 "__ADMIN_LOGIN__" --password1 "$ADMIN_PLAIN" \
     --host2 "__EXCHANGE_IMAP_HOST__" --port2 "__EXCHANGE_IMAP_PORT__" __SSL2__ \
-    --user2 "__USER_EMAIL__" \
+    --user2 "__USER2_LOGIN__" \
     --authuser2 "__ADMIN_LOGIN__" --password2 "$ADMIN_PLAIN" \
     --useuid \
     --syncinternaldates \
@@ -389,11 +390,18 @@ done
 exit $rc
 '@
 
+  # Host2 (Exchange IMAP) login: use -AD as UPN; append @<Domain> if missing
+  $user2login = $UserEmail
+  if ($AdSamAccount -and -not [string]::IsNullOrWhiteSpace($AdSamAccount)) {
+    if ($AdSamAccount -like '*@*') { $user2login = $AdSamAccount }
+    else { $user2login = "$AdSamAccount@$Domain" }
+  }
   $repl = @{
     "__IMAPSYNC_PATH__"       = $ImapSyncPath
     "__REMOTE_LOG__"          = $RemoteLog
     "__ADMIN_IMAP_B64__"      = $AdminImapB64
     "__USER_EMAIL__"          = $UserEmail
+    "__USER2_LOGIN__"         = $user2login
     "__ZIMBRA_IMAP_HOST__"    = $ZimbraImapHost
     "__ZIMBRA_IMAP_PORT__"    = "$ZimbraImapPort"
     "__EXCHANGE_IMAP_HOST__"  = $ExchangeImapHost
@@ -423,7 +431,6 @@ exit $rc
     $stream.WriteLine($startCmd)
 
     $writer = New-Object System.IO.StreamWriter($LocalLog, $false, [Text.Encoding]::UTF8)
-    $lineBuf = ""
     try {
       $exitCode = $null
       while ($true) {
@@ -432,19 +439,6 @@ exit $rc
           if ($chunk) {
             Write-Host -NoNewline $chunk
             $writer.Write($chunk); $writer.Flush()
-            # Try to parse full lines from chunk to detect imapsync total/progress
-            $lineBuf += $chunk
-            while ($lineBuf -match "^(.*?)(?:`r?`n)") {
-              $line  = $matches[1]
-              $lineBuf = $lineBuf.Substring($matches[0].Length)
-              try {
-                if ($line -match 'Progression\s*:\s*(\d+)\s*/\s*(\d+)') {
-                  Write-Host ("__IMAPSYNC_PROGRESS__:{0}/{1}" -f $matches[1], $matches[2])
-                } elseif ($line -match '(?i)(?:messages\s+copied|copied)\s*:?\s*(\d+)\s*/\s*(\d+)') {
-                  Write-Host ("__IMAPSYNC_PROGRESS__:{0}/{1}" -f $matches[1], $matches[2])
-                }
-              } catch {}
-            }
             if ($chunk -match "__END__:(\d+)") { $exitCode = [int]$matches[1]; break }
             elseif ($chunk -match "__END__:(True|False)") {
             if ($matches[1] -eq "True") {

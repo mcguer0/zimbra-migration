@@ -21,6 +21,9 @@ param(
 
   # Постепенная миграция (staged)
   [switch]$Staged
+  ,
+  # Имя учетной записи в AD (sAMAccountName), если отличается от почтового алиаса
+  [string]$AD
 )
 
 # == Конфиг и функции ==
@@ -97,9 +100,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Single') {
   Write-Host ''
   Write-Host ("==================== {0} ====================" -f $u) -ForegroundColor Cyan
   $jobs += Start-Job -Name ("mig-" + ($u -replace "[^\w\.-]","_")) -ArgumentList @(
-      $u, $PSScriptRoot, [bool]$Force, [bool]$Dryrun, [bool]$Staged
+      $u, $PSScriptRoot, [bool]$Force, [bool]$Dryrun, [bool]$Staged, $AD
     ) -ScriptBlock {
-      param($UserInput, $Root, [bool]$Force, [bool]$Dryrun, [bool]$Staged)
+      param($UserInput, $Root, [bool]$Force, [bool]$Dryrun, [bool]$Staged, [string]$AdLogin)
 
       . "$Root\scripts\config.ps1"
       . "$Root\scripts\utils.ps1"
@@ -136,7 +139,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Single') {
         return
       }
 
-      $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged -Activate:$Force
+      $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged -Activate:$Force -AdSamAccount $AdLogin
       $UserEmail = $move.UserEmail
       $Alias     = $move.Alias
 
@@ -163,18 +166,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Single') {
   try {
     while ($true) {
       $current = Get-Job -Id ($jobs | Select-Object -ExpandProperty Id)
-      # Строка прогресса под пользователем из маркеров дочерней задачи
-      foreach ($j in $current) {
-        $out = Receive-Job -Job $j -Keep -ErrorAction SilentlyContinue
-        if ($out) {
-          foreach ($line in ($out | ForEach-Object { $_.ToString() })) {
-            if ($line -match '^__IMAPSYNC_PROGRESS__:(\d+)/(\d+)') {
-              $d = [int]$matches[1]; $t = [int]$matches[2]
-              Write-Host ("  {0}: {1}/{2}" -f $u, $d, $t)
-            }
-          }
-        }
-      }
+      # Обычный прогресс без построчного вывода маркеров
       $done    = ($current | Where-Object { $_.State -in 'Completed','Failed','Stopped' }).Count
       $running = ($current | Where-Object { $_.State -eq 'Running' }).Count
       $percent = if ($total -gt 0) { [int](($done / $total) * 100) } else { 100 }
@@ -198,14 +190,13 @@ $list = Get-Content -Path $Path -Encoding UTF8 | ForEach-Object { $_.Trim() } | 
 if (-not $list -or $list.Count -eq 0) { Write-Host 'Список пуст.'; return }
 
 $jobs = @()
-$userMap = @{}
 foreach ($u in $list) {
   Write-Host ''
   Write-Host ("==================== {0} ====================" -f $u) -ForegroundColor Cyan
   $job = Start-Job -Name ("mig-" + ($u -replace "[^\w\.-]","_")) -ArgumentList @(
-      $u, $PSScriptRoot, [bool]$Force, [bool]$Dryrun, [bool]$Staged
+      $u, $PSScriptRoot, [bool]$Force, [bool]$Dryrun, [bool]$Staged, $AD
     ) -ScriptBlock {
-      param($UserInput, $Root, [bool]$Force, [bool]$Dryrun, [bool]$Staged)
+      param($UserInput, $Root, [bool]$Force, [bool]$Dryrun, [bool]$Staged, [string]$AdLogin)
 
       # Подгружаем зависимости в контексте job
       . "$Root\scripts\config.ps1"
@@ -243,7 +234,7 @@ foreach ($u in $list) {
         return
       }
 
-      $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged -Activate:$Force
+      $move = Invoke-MoveZimbraMailbox -UserInput $UserInput -Staged:$Staged -Activate:$Force -AdSamAccount $AdLogin
       $UserEmail = $move.UserEmail
       $Alias     = $move.Alias
 
@@ -262,7 +253,6 @@ foreach ($u in $list) {
       }
     }
   $jobs += $job
-  $userMap[$job.Id] = $u
 }
 
 if ($jobs.Count -gt 0) {
@@ -274,19 +264,7 @@ if ($jobs.Count -gt 0) {
   try {
     while ($true) {
       $current = Get-Job -Id ($jobs | Select-Object -ExpandProperty Id)
-      # Выводим строку прогресса под каждым пользователем, если пришли маркеры
-      foreach ($j in $current) {
-        $out = Receive-Job -Job $j -Keep -ErrorAction SilentlyContinue
-        if ($out) {
-          foreach ($line in ($out | ForEach-Object { $_.ToString() })) {
-            if ($line -match '^__IMAPSYNC_PROGRESS__:(\d+)/(\d+)') {
-              $d = [int]$matches[1]; $t = [int]$matches[2]
-              $usr = if ($userMap.ContainsKey($j.Id)) { $userMap[$j.Id] } else { $j.Name }
-              Write-Host ("  {0}: {1}/{2}" -f $usr, $d, $t)
-            }
-          }
-        }
-      }
+      # Обычный прогресс без построчного вывода маркеров
       $done    = ($current | Where-Object { $_.State -in 'Completed','Failed','Stopped' }).Count
       $running = ($current | Where-Object { $_.State -eq 'Running' }).Count
       $percent = if ($total -gt 0) { [int](($done / $total) * 100) } else { 100 }

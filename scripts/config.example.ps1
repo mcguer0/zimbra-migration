@@ -38,7 +38,7 @@ $PMGUser                = ""
 $PMGPasswordPlain       = ""
 
 # Каталог для кэша imapsync
-$cache_dir = "~/cache"
+$cache_dir = "~/CACHE_imapsync"
 
 # Логи на Windows
 $LocalLogDir            = Join-Path (Split-Path $PSScriptRoot -Parent) 'ImapSyncLogs'
