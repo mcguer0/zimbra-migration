@@ -364,6 +364,7 @@ while [ $attempt -le $TRIES ]; do
     --addheader \
     --fastio1 --fastio2 \
     --nofoldersizes \
+    --tmpdir __CACHE_DIR__ \
     --usecache \
     --useheader 'Message-Id' \
     --delete2duplicates \
@@ -397,6 +398,7 @@ exit $rc
     "__ZIMBRA_IMAP_PORT__"    = "$ZimbraImapPort"
     "__EXCHANGE_IMAP_HOST__"  = $ExchangeImapHost
     "__EXCHANGE_IMAP_PORT__"  = "$ExchangeImapPort"
+    "__CACHE_DIR__"           = $cache_dir
     "__SSL1__"                = $ssl1
     "__SSL2__"                = $ssl2
     "__ADMIN_LOGIN__"         = $AdminLogin
